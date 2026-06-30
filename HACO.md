@@ -727,6 +727,7 @@ scanner:
   include_recent_files: true
   include_readme_preview: true
   include_repo_map: true
+  respect_gitignore: true   # git check-ignore로 무시 파일을 스캔에서 제외(git 없으면 무필터)
   ignore_dirs:
     - .git
     - .haco
@@ -1638,6 +1639,7 @@ Proceed with normal bounded exploration.
     "best_candidate": "",
     "warnings": []
   },
+  "prior_change_reference": "",
   "constraints": [],
   "assumptions": [],
   "recommended_action": "",
@@ -1670,6 +1672,9 @@ Proceed with normal bounded exploration.
 - test_scope와 tests_to_run은 test_candidate 결과를 따른다.
 - files_to_read/files_to_edit는 file_locator 결과를 따른다.
 - candidate_summary는 candidates/와 candidate_judge 결과를 반영한다.
+- prior_change_reference는 code_change/refactor/test_failure 작업에서 files_to_edit[0]을 마지막으로
+  바꾼 커밋 diff를 `prior_change_reference.md`로 쓰고 그 rel 경로를 담는다(반복 증분 템플릿). git/이력이
+  없거나 편집 대상이 없으면 빈 문자열. git 기반·결정론·provider 비의존.
 - recommended_action은 짧게 쓴다.
 - reason은 최대 5문장으로 압축한다.
 - core worker가 실패하면 haco_status=skip_to_main_agent로 설정한다.
@@ -1903,6 +1908,12 @@ postflight_packet.json
 `postflight`는 실패 로그가 있으면 `failure_fixer`를 실행해 fix 후보를 생성할 수 있어야 한다.
 
 단, fix 후보도 직접 적용하지 않는다.
+
+테스트 결과 판정(`_detect_test_outcome`)은 다음 우선순위를 따른다. (1) pytest `N failed`/`N error(s)`
+카운트(합 0이면 통과), (2) pytest를 안 쓰는 자체 verifier의 `status PASS/FAIL` 라인(여러 줄이면 전부
+pass라야 통과), (3) 강한 실패 마커(`failed`/`traceback`/`assertionerror`) 또는 통과 마커(`passed`/`ok`).
+판정 불가면 `tests_passed=null`(미상)이며, report의 Tests 표기는 not run/unknown/passed/failed로 구분한다
+(미상을 failed로 적지 않는다).
 
 ---
 

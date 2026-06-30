@@ -93,7 +93,9 @@ under `<--project>/.haco/runs/`. Generates `report.md` and `postflight_packet.js
 parsing the `HACO Validation` section from `execution_result.md`. If a failure log is
 present it runs `failure_fixer` to produce a (non-applied) fix candidate. The failure
 log is read from pytest-style `N failed` / `N error` counts, so a mixed summary like
-`1 failed, 71 passed` is correctly detected as a failure.
+`1 failed, 71 passed` is correctly detected as a failure. Script-based verifiers that
+print a `status PASS` / `status FAIL` line (no pytest counts) are also recognized, and
+an unrecognized log is reported as `unknown` — never silently as `failed`.
 
 ## run / show
 
@@ -134,10 +136,17 @@ See "HACO Usage Rule" below for a drop-in `AGENTS.md`/`CLAUDE.md` snippet.
   task_packet.json        # compact contract for the main agent
   execution_brief.md      # what the main agent reads first
   candidates/             # candidate packages (see below)
+  prior_change_reference.md  # last commit that touched the edit target (code tasks; if any)
   metrics.json            # cost-tracking signals
   report.md               # postflight (after run)
   postflight_packet.json  # postflight effectiveness data
 ```
+
+For `code_change` / `refactor` / `test_failure` tasks, HACO records the most recent
+commit diff that touched `files_to_edit[0]` as `prior_change_reference.md` and points to
+it from the brief — a concrete template for repetitive, incremental work (e.g. a marker
+chain). It is git-based, deterministic, and provider-independent; absent for non-code
+tasks or when there is no prior commit/edit target.
 
 ## candidates directory
 
@@ -173,6 +182,10 @@ edit_plan / search_replace / replacement_blocks.
 built-in `ast` (classes, functions, signatures, imports, docstring previews), and
 best-effort regex symbol hints for JS/TS/Rust/Go. tree-sitter is optional. repo_map
 failure never fails preflight.
+
+With `scanner.respect_gitignore: true` (default), files ignored by git (via
+`git check-ignore`) are dropped from the scan, so generated/scratch outputs don't
+pollute `files_to_read` or keyword matches. No filtering when git is unavailable.
 
 ## Token / size budget & structural trimming
 
