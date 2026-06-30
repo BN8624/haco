@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "haco"
+version = "0.1.0"
+description = "Harness for Agent Cost Optimization - a CLI harness that coding agents call before doing expensive work."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+google = ["google-genai>=1.0"]
+yaml = ["PyYAML>=6.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+haco = "haco.cli:main"
+
+[tool.setuptools]
+packages = ["haco"]
+
+[tool.setuptools.package-data]
+haco = ["../prompts/*.md", "../bootstrap/prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,99 @@
+provider: mock
+
+google:
+  model: gemma-4-31b-it
+  api_key_env: GOOGLE_API_KEY
+  api_key_envs:
+    - GOOGLE_API_KEY_01
+    - GOOGLE_API_KEY_02
+    - GOOGLE_API_KEY_03
+    - GOOGLE_API_KEY_04
+    - GOOGLE_API_KEY_05
+    - GOOGLE_API_KEY_06
+    - GOOGLE_API_KEY_07
+    - GOOGLE_API_KEY_08
+    - GOOGLE_API_KEY_09
+    - GOOGLE_API_KEY_10
+    - GOOGLE_API_KEY_11
+
+provider_retry:
+  max_retries: 3
+  initial_backoff_seconds: 1
+  max_backoff_seconds: 20
+  rotate_keys_on_429: true
+  fail_worker_on_exhausted_retries: false
+
+concurrency:
+  recommended_concurrency: 4
+  max_concurrency: 11
+  bootstrap_concurrency: 4
+
+runs_dir: .haco/runs
+
+workers:
+  enabled:
+    - task_router
+    - context_compressor
+    - file_locator
+    - patch_candidate
+    - test_candidate
+    - doc_reporter
+    - candidate_judge
+  conditional:
+    - failure_fixer
+
+profiles:
+  default: standard
+  quick:
+    - task_router
+    - context_compressor
+    - file_locator
+    - doc_reporter
+  standard:
+    - task_router
+    - context_compressor
+    - file_locator
+    - patch_candidate
+    - test_candidate
+    - doc_reporter
+    - candidate_judge
+  deep:
+    - task_router
+    - context_compressor
+    - file_locator
+    - patch_candidate
+    - test_candidate
+    - doc_reporter
+    - candidate_judge
+
+limits:
+  max_worker_output_chars: 6000
+  max_reason_chars: 800
+  max_candidate_chars: 20000
+  max_files_in_snapshot: 300
+  max_file_preview_chars: 6000
+  fail_on_invalid_json: false
+
+budgets:
+  max_project_snapshot_chars: 30000
+  max_repo_map_chars: 12000
+  max_execution_brief_chars: 16000
+  max_task_packet_chars: 12000
+  max_candidate_total_chars: 40000
+  token_estimation: "char_div_4"
+
+scanner:
+  include_tree_depth: 3
+  include_git_status: true
+  include_recent_files: true
+  include_readme_preview: true
+  include_repo_map: true
+  ignore_dirs:
+    - .git
+    - .haco
+    - .venv
+    - venv
+    - node_modules
+    - __pycache__
+    - dist
+    - build

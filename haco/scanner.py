@@ -1,0 +1,228 @@
+# 대상 프로젝트를 가볍게 스캔해 project_snapshot 을 만든다 (worker 호출 전 단계).
+from __future__ import annotations
+
+import re
+import subprocess
+from pathlib import Path
+
+from haco.config import Config
+from haco.repo_map import build_repo_map
+
+IMPORTANT_NAMES = [
+    "README.md", "README.rst", "AGENTS.md", "CLAUDE.md", "pyproject.toml",
+    "setup.py", "setup.cfg", "requirements.txt", "package.json", "tsconfig.json",
+    "Cargo.toml", "go.mod", "Makefile", "Dockerfile", "pytest.ini", "tox.ini",
+]
+
+
+def _iter_files(root: Path, ignore_dirs: set[str], max_files: int) -> list[str]:
+    out: list[str] = []
+    for dirpath, dirnames, filenames in __import__("os").walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs and
+                       not d.startswith(".egg-info")]
+        for f in filenames:
+            rel = str(Path(dirpath, f).relative_to(root)).replace("\\", "/")
+            out.append(rel)
+            if len(out) >= max_files:
+                return out
+    return out
+
+
+def _tree_preview(root: Path, ignore_dirs: set[str], depth: int) -> list[str]:
+    lines: list[str] = []
+    for dirpath, dirnames, filenames in __import__("os").walk(root):
+        dirnames[:] = [d for d in dirnames if d not in ignore_dirs]
+        rel = Path(dirpath).relative_to(root)
+        level = 0 if str(rel) == "." else len(rel.parts)
+        if level > depth:
+            dirnames[:] = []
+            continue
+        indent = "  " * level
+        name = root.name if str(rel) == "." else rel.parts[-1]
+        lines.append(f"{indent}{name}/")
+        for f in sorted(filenames)[:20]:
+            lines.append(f"{indent}  {f}")
+        if len(lines) > 200:
+            break
+    return lines[:200]
+
+
+def _detect_language(file_paths: list[str], important: list[str]) -> str:
+    counts: dict[str, int] = {}
+    for p in file_paths:
+        ext = Path(p).suffix.lower()
+        counts[ext] = counts.get(ext, 0) + 1
+    if "pyproject.toml" in important or "setup.py" in important or \
+            "requirements.txt" in important or counts.get(".py", 0) > 0:
+        if counts.get(".py", 0) >= max(counts.get(".ts", 0), counts.get(".js", 0),
+                                       counts.get(".rs", 0), counts.get(".go", 0)):
+            return "python"
+    if counts.get(".ts", 0) > 0 or "tsconfig.json" in important:
+        return "typescript"
+    if counts.get(".js", 0) > 0 or "package.json" in important:
+        return "javascript"
+    if counts.get(".rs", 0) > 0 or "Cargo.toml" in important:
+        return "rust"
+    if counts.get(".go", 0) > 0 or "go.mod" in important:
+        return "go"
+    if counts.get(".py", 0) > 0:
+        return "python"
+    return "unknown"
+
+
+def _detect_project_type(language: str, important: list[str]) -> str:
+    if "pyproject.toml" in important or "setup.py" in important:
+        return "python_package"
+    if "package.json" in important:
+        return "node_package"
+    if "Cargo.toml" in important:
+        return "rust_crate"
+    if "go.mod" in important:
+        return "go_module"
+    if language != "unknown":
+        return "generic"
+    return "unknown"
+
+
+def _detect_test_frameworks(project_path: Path, important: list[str],
+                            file_paths: list[str]) -> list[str]:
+    fw: list[str] = []
+    pyproject = project_path / "pyproject.toml"
+    if "pytest.ini" in important or "tox.ini" in important:
+        fw.append("pytest")
+    elif pyproject.exists() and "pytest" in pyproject.read_text(
+            encoding="utf-8", errors="replace"):
+        fw.append("pytest")
+    elif any(re.search(r"(^|/)tests?/.*test_.*\.py$", p) or
+             re.search(r"test_.*\.py$", p) for p in file_paths):
+        fw.append("pytest")
+    pkg = project_path / "package.json"
+    if pkg.exists():
+        txt = pkg.read_text(encoding="utf-8", errors="replace")
+        if "vitest" in txt:
+            fw.append("vitest")
+        elif "jest" in txt:
+            fw.append("jest")
+        elif '"test"' in txt:
+            fw.append("npm test")
+    if any(p == "vitest.config.ts" or p.startswith("vitest.config") for p in file_paths):
+        if "vitest" not in fw:
+            fw.append("vitest")
+    if "Cargo.toml" in important:
+        fw.append("cargo test")
+    if "go.mod" in important:
+        fw.append("go test")
+    return list(dict.fromkeys(fw))
+
+
+def _git_status(project_path: Path) -> str:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(project_path), "status", "--porcelain"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=10,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()[:2000]
+    except Exception:
+        pass
+    return ""
+
+
+def _recent_files(project_path: Path, file_paths: list[str], n: int = 15) -> list[str]:
+    with_mtime = []
+    for rel in file_paths:
+        p = project_path / rel
+        try:
+            with_mtime.append((p.stat().st_mtime, rel))
+        except OSError:
+            continue
+    with_mtime.sort(reverse=True)
+    return [rel for _, rel in with_mtime[:n]]
+
+
+def _extract_keywords(task: str) -> list[str]:
+    tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", task)
+    stop = {"the", "and", "for", "add", "fix", "use", "this", "that", "with",
+            "into", "from", "should", "must", "make", "run", "test", "tests"}
+    out: list[str] = []
+    for t in tokens:
+        low = t.lower()
+        if low in stop or len(t) < 3:
+            continue
+        out.append(t)
+    return list(dict.fromkeys(out))[:20]
+
+
+def _keyword_matches(keywords: list[str], file_paths: list[str]) -> list[str]:
+    matches: list[str] = []
+    lowered = [(p, p.lower()) for p in file_paths]
+    for kw in keywords:
+        k = kw.lower()
+        for orig, low in lowered:
+            if k in low and orig not in matches:
+                matches.append(orig)
+    return matches[:30]
+
+
+def scan_project(project_path: Path, task: str, config: Config) -> dict:
+    """대상 프로젝트를 스캔해 project_snapshot dict를 반환한다."""
+    project_path = Path(project_path)
+    sc = config.get("scanner", default={})
+    ignore_dirs = set(sc.get("ignore_dirs", []))
+    depth = sc.get("include_tree_depth", 3)
+    max_files = config.get("limits", "max_files_in_snapshot", default=300)
+
+    file_paths = _iter_files(project_path, ignore_dirs, max_files)
+    important = [p for p in file_paths if Path(p).name in IMPORTANT_NAMES]
+    important_names = [Path(p).name for p in important]
+
+    language = _detect_language(file_paths, important_names)
+    project_type = _detect_project_type(language, important_names)
+    test_frameworks = _detect_test_frameworks(project_path, important_names, file_paths)
+
+    keywords = _extract_keywords(task)
+    keyword_matches = _keyword_matches(keywords, file_paths)
+
+    repo_map: list[dict] = []
+    repo_map_status = "skipped"
+    repo_map_notes: list[str] = []
+    if sc.get("include_repo_map", True):
+        repo_map, repo_map_status, repo_map_notes = build_repo_map(
+            project_path, file_paths)
+
+    readme_preview = ""
+    if sc.get("include_readme_preview", True):
+        for cand in ("README.md", "README.rst"):
+            rp = project_path / cand
+            if rp.exists():
+                readme_preview = rp.read_text(
+                    encoding="utf-8", errors="replace")[:1000]
+                break
+
+    snapshot = {
+        "project_path": str(project_path),
+        "primary_language": language,
+        "project_type": project_type,
+        "test_frameworks": test_frameworks,
+        "package_files": [p for p in important
+                          if Path(p).name in (
+                              "pyproject.toml", "package.json", "Cargo.toml",
+                              "go.mod", "setup.py", "requirements.txt")],
+        "tree_preview": _tree_preview(project_path, ignore_dirs, depth),
+        "file_paths_sample": file_paths[:200],
+        "git_status": _git_status(project_path) if sc.get("include_git_status", True) else "",
+        "recent_files": _recent_files(project_path, file_paths)
+        if sc.get("include_recent_files", True) else [],
+        "important_files": important,
+        "readme_preview": readme_preview,
+        "keyword_file_matches": keyword_matches,
+        "search_hints": keywords,
+        "repo_map": repo_map,
+        "repo_map_status": repo_map_status,
+        "repo_map_notes": repo_map_notes,
+        "truncation_applied": False,
+        "truncation_notes": [],
+        "notes": [],
+    }
+    return snapshot
