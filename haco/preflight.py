@@ -1,6 +1,7 @@
 # preflight 오케스트레이션: scan -> budget -> workers(stage/profile) -> candidates -> aggregate -> brief.
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from haco.run_store import create_run
 from haco.scanner import scan_project
 from haco.schemas import TaskPacket
 from haco.workers import (CORE_WORKERS, compact_snapshot, focused_rescan,
-                          run_worker)
+                          run_worker, run_worker_async)
 from haco.utils import write_json, write_text
 
 
@@ -124,7 +125,8 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
         skip, skip_reason = True, "locator_failed"
         suggested = "Improve repo_map or search_hints for this project type."
 
-    # ---- Stage 2: candidate generation (conditional) ----
+    # ---- Stage 2: non-core 후보 생성 (concurrency 적용) ----
+    # core worker(위)는 순차 유지. 여기서만 asyncio로 병렬화한다.
     metas = []
     suppressed = _patch_test_suppressed(task_type, risk)
     run_patch = (not skip and not suppressed and
@@ -132,26 +134,58 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
                  task_type in ("code_change", "refactor", "test_failure"))
     run_test = (not skip and not suppressed and
                 "test_candidate" in profile_workers)
+    run_doc = "doc_reporter" in profile_workers
 
-    if run_patch:
-        # deep profile은 patch 후보 복수 생성
-        n_patch = 2 if profile == "deep" else 1
-        for i in range(1, n_patch + 1):
-            cid = f"candidate_{i:02d}"
-            out = call("patch_candidate", {"candidate_id": cid})
-            out.setdefault("candidate_id", cid)
-            metas.append(write_patch_candidate(run_path, out))
+    def acall_ctx(name: str, extra: dict | None = None) -> dict:
+        c = {"task": task, "worker": name, "snapshot": ctx_snapshot, "prior": outputs}
+        if extra:
+            c.update(extra)
+        return c
 
-    if run_test:
-        out = call("test_candidate")
-        test_cid = "candidate_test_01"
-        meta = write_test_candidate(run_path, out, test_cid)
-        if meta:
-            metas.append(meta)
+    async def _run_stage2() -> None:
+        # Phase A (병렬): 서로 독립인 patch 후보(들) + doc_reporter.
+        #   - deep profile은 patch 후보 복수를 asyncio.gather로 병렬 생성한다.
+        #   - doc_reporter는 후보 생성과 병렬로 실행한다.
+        specs: list[tuple] = []
+        if run_patch:
+            n_patch = 2 if profile == "deep" else 1
+            for i in range(1, n_patch + 1):
+                cid = f"candidate_{i:02d}"
+                oname = "patch_candidate" if i == 1 else f"patch_candidate_{i:02d}"
+                specs.append(("patch_candidate", {"candidate_id": cid}, oname,
+                              ("patch", cid)))
+        if run_doc:
+            specs.append(("doc_reporter", {}, "doc_reporter", ("doc", None)))
 
-    # doc_reporter (profile에 있으면 항상)
-    if "doc_reporter" in profile_workers:
-        call("doc_reporter")
+        if specs:
+            coros = [run_worker_async(provider, n, acall_ctx(n, ex), run_path,
+                                      config, output_name=on)
+                     for (n, ex, on, _tag) in specs]
+            results = await asyncio.gather(*coros)
+            # 완료 순서와 무관하게 spec 순서대로 결정적으로 반영한다.
+            for (n, ex, on, tag), (out, elapsed, ok) in zip(specs, results):
+                timings[on] = elapsed
+                if tag[0] == "patch":
+                    cid = tag[1]
+                    out.setdefault("candidate_id", cid)
+                    if cid == "candidate_01":
+                        outputs["patch_candidate"] = out
+                    metas.append(write_patch_candidate(run_path, out))
+                else:
+                    outputs["doc_reporter"] = out
+
+        # Phase B (순차): test_candidate는 patch_candidate 이후 실행한다.
+        if run_test:
+            out, elapsed, _ok = await run_worker_async(
+                provider, "test_candidate", acall_ctx("test_candidate"),
+                run_path, config)
+            timings["test_candidate"] = elapsed
+            outputs["test_candidate"] = out
+            meta = write_test_candidate(run_path, out, "candidate_test_01")
+            if meta:
+                metas.append(meta)
+
+    asyncio.run(_run_stage2())
 
     # ---- Stage 3: judge + hard filter ----
     judge: dict = {}

@@ -47,35 +47,69 @@ def _fallback_output(name: str, reason: str) -> dict:
     return base
 
 
-def run_worker(provider: ModelProvider, name: str, context: dict,
-               run_path: Path, config: Config) -> tuple[dict, float, bool]:
-    """worker 1개를 실행한다. 반환: (validated_output, elapsed_seconds, ok)."""
-    prompt = build_prompt(name, context)
+def _record_success(name: str, raw: dict, run_path: Path,
+                    output_name: str | None) -> dict:
     out_dir = Path(run_path) / "worker_outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
+    validated = validate_worker_output(name, raw).model_dump()
+    # worker 출력에 워커가 넣은 보조 필드(_target_files 등) 보존
+    for k, v in raw.items():
+        if k.startswith("_") and k not in validated:
+            validated[k] = v
+    write_json(out_dir / f"{output_name or name}.json", validated)
+    return validated
 
+
+def _record_failure(name: str, e: Exception, run_path: Path,
+                    output_name: str | None) -> dict:
+    out_dir = Path(run_path) / "worker_outputs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    validated = _fallback_output(name, f"{type(e).__name__}: {e}")
+    write_json(out_dir / f"{name}.error.json", {
+        "worker": name,
+        "error_type": type(e).__name__,
+        "error_message": str(e)[:500],
+        "key_value_logged": False,
+    })
+    write_json(out_dir / f"{output_name or name}.json", validated)
+    return validated
+
+
+def run_worker(provider: ModelProvider, name: str, context: dict,
+               run_path: Path, config: Config,
+               output_name: str | None = None) -> tuple[dict, float, bool]:
+    """worker 1개를 동기로 실행한다. 반환: (validated_output, elapsed_seconds, ok).
+
+    output_name으로 worker_outputs 파일명을 분리할 수 있다(복수 patch 후보 등).
+    """
+    prompt = build_prompt(name, context)
     start = time.perf_counter()
-    ok = True
     try:
         raw = provider.generate_json(prompt, name)
-        validated = validate_worker_output(name, raw).model_dump()
-        # worker 출력에 워커가 넣은 보조 필드(_target_files 등) 보존
-        for k, v in raw.items():
-            if k.startswith("_") and k not in validated:
-                validated[k] = v
     except Exception as e:  # noqa: BLE001 - worker 실패는 전체를 죽이지 않는다
-        ok = False
-        validated = _fallback_output(name, f"{type(e).__name__}: {e}")
-        write_json(out_dir / f"{name}.error.json", {
-            "worker": name,
-            "error_type": type(e).__name__,
-            "error_message": str(e)[:500],
-            "key_value_logged": False,
-        })
+        elapsed = time.perf_counter() - start
+        return _record_failure(name, e, run_path, output_name), elapsed, False
     elapsed = time.perf_counter() - start
+    return _record_success(name, raw, run_path, output_name), elapsed, True
 
-    write_json(out_dir / f"{name}.json", validated)
-    return validated, elapsed, ok
+
+async def run_worker_async(provider: ModelProvider, name: str, context: dict,
+                           run_path: Path, config: Config,
+                           output_name: str | None = None) -> tuple[dict, float, bool]:
+    """worker 1개를 비동기로 실행한다(generate_json_async 사용).
+
+    동기 provider도 to_thread로 감싸지므로 asyncio.gather로 병렬화된다.
+    결과 파일명은 output_name으로 결정적으로 분리한다.
+    """
+    prompt = build_prompt(name, context)
+    start = time.perf_counter()
+    try:
+        raw = await provider.generate_json_async(prompt, name)
+    except Exception as e:  # noqa: BLE001
+        elapsed = time.perf_counter() - start
+        return _record_failure(name, e, run_path, output_name), elapsed, False
+    elapsed = time.perf_counter() - start
+    return _record_success(name, raw, run_path, output_name), elapsed, True
 
 
 def focused_rescan(snapshot: dict, search_keywords: list[str], top_n: int = 8) -> list[str]:

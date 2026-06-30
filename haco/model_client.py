@@ -22,8 +22,10 @@ class ModelProvider:
         raise NotImplementedError
 
     async def generate_json_async(self, prompt: str, schema_name: str) -> dict:
-        # 기본은 동기 호출 래핑
-        return self.generate_json(prompt, schema_name)
+        # 동기 provider를 별도 스레드로 오프로드해 실제 동시 실행을 가능하게 한다.
+        # (동기 provider만 있어도 asyncio.gather로 병렬화된다.)
+        import asyncio
+        return await asyncio.to_thread(self.generate_json, prompt, schema_name)
 
 
 # ----------------------------- Mock -----------------------------
