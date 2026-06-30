@@ -69,6 +69,10 @@ def test_postflight_without_test_log(sample_project, config):
     ("FAILED tests/test_calc.py::test_add - AssertionError", False),  # 단일 라인(요약 없음)
     ("tests/test_error_handling.py::test_x passed\n5 passed in 1s", True),  # 테스트명 error 오탐 방지
     ("ran 5 tests in 0.1s\n\nok", True),                   # unittest 통과
+    ("mode smoke ticks 5000 status PASS\nseeds 1 determinism_fail 0", True),  # 자체 verifier status PASS
+    ("mode quick ticks 5000 status FAIL\ndeterminism_fail 3", False),         # 자체 verifier status FAIL
+    ("status PASS\nstatus PASS", True),                    # 다중 status 전부 통과
+    ("status PASS\nstatus FAIL", False),                   # 다중 status 중 하나 실패
 ])
 def test_detect_test_outcome(tmp_path, log, expected):
     (tmp_path / "test_log.txt").write_text(log, encoding="utf-8")
@@ -81,6 +85,39 @@ def test_detect_test_outcome_empty_is_unknown(tmp_path):
     (tmp_path / "test_log.txt").write_text("   \n", encoding="utf-8")
     ran, passed = _detect_test_outcome(tmp_path)
     assert ran is True and passed is None
+
+
+def test_postflight_report_unknown_not_failed(sample_project, config):
+    # tests_passed가 None(미상)이면 report는 'failed'가 아니라 'unknown'으로 표기해야 한다.
+    result = _preflight(sample_project, config)
+    run = result["run_path"]
+    from pathlib import Path
+    (Path(run) / "execution_result.md").write_text(
+        "## HACO Validation\ntask_packet_read: yes\n", encoding="utf-8")
+    (Path(run) / "test_log.txt").write_text(
+        "some output with no recognizable test outcome", encoding="utf-8")
+    run_postflight(run_path=run, project_path=sample_project,
+                   config=config, provider=MockProvider())
+    report = (Path(run) / "report.md").read_text(encoding="utf-8")
+    assert "- Tests: unknown" in report
+    assert "- Tests: failed" not in report
+
+
+def test_postflight_verifier_status_pass_is_passed(sample_project, config):
+    # 자체 verifier의 'status PASS' 라인을 통과로 인식하고 fix 후보를 만들지 않아야 한다.
+    result = _preflight(sample_project, config)
+    run = result["run_path"]
+    from pathlib import Path
+    (Path(run) / "execution_result.md").write_text(
+        "## HACO Validation\ntask_packet_read: yes\n", encoding="utf-8")
+    (Path(run) / "test_log.txt").write_text(
+        "mode smoke ticks 5000 status PASS\nseeds 1 determinism_fail 0 forbidden 0",
+        encoding="utf-8")
+    pf = run_postflight(run_path=run, project_path=sample_project,
+                        config=config, provider=MockProvider())
+    report = (Path(run) / "report.md").read_text(encoding="utf-8")
+    assert "- Tests: passed" in report
+    assert not pf["fix_candidates"]
 
 
 def test_postflight_failure_generates_fix(sample_project, config):

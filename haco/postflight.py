@@ -62,7 +62,12 @@ def _detect_test_outcome(run_path: Path) -> tuple[bool, bool | None]:
         fail_counts = [int(n) for n in re.findall(r"(\d+)\s+(?:failed|errors?)", log)]
         if fail_counts:
             return True, sum(fail_counts) == 0
-        # 카운트가 없으면 명시적 실패 마커로 판정한다. 단독 'error'/'fail'은 테스트명 오탐이
+        # pytest 카운트가 없으면 'status: PASS' / 'status FAIL' 같은 명시적 최종 상태 라인을
+        # 신뢰한다. pytest를 안 쓰는 자체 verifier가 흔히 쓰는 관례다. 여러 라인이면 전부 pass라야 통과.
+        status_marks = re.findall(r"status\s*:?\s+(pass|fail)\b", log)
+        if status_marks:
+            return True, all(m == "pass" for m in status_marks)
+        # 카운트도 상태 라인도 없으면 명시적 실패 마커로 판정한다. 단독 'error'/'fail'은 테스트명 오탐이
         # 잦아 제외하고, 강한 신호만 쓴다.
         if any(w in log for w in ("failed", "traceback", "assertionerror")):
             return True, False
@@ -121,7 +126,12 @@ def run_postflight(*, run_path: Path, project_path: Path | None,
 
     # report.md
     v = pf.haco_validation
-    tests_str = ("passed" if tests_passed else "failed") if tests_ran else "not run"
+    if not tests_ran:
+        tests_str = "not run"
+    elif tests_passed is None:
+        tests_str = "unknown"
+    else:
+        tests_str = "passed" if tests_passed else "failed"
     report = "\n".join([
         "# HACO Report",
         "",
