@@ -37,17 +37,24 @@ def _detect_task_type(task: str) -> str:
         return "test_failure"
     if any(w in t for w in ["refactor", "리팩터", "리팩토링"]):
         return "refactor"
-    if any(w in t for w in ["plan", "design only", "설계만", "계획"]):
-        return "planning"
-    if any(w in t for w in ["research", "investigate", "조사"]):
-        return "research"
-    # 실행/검증/구현 신호가 있으면 docs_only가 아니다.
-    # (이전엔 "doc" substring이 "docs/archive" 같은 경로 언급에 오탐했다.)
+    # 실행/검증/구현 신호가 있으면 planning/research/docs_only가 아니다.
+    # (이전엔 "doc" substring이 "docs/archive"에 오탐했고, "plan" substring이
+    #  "IMPLEMENTATION_PLAN" 파일명 언급에 오탐해 marker 구현 작업을 planning으로 떨궜다.)
     code_signal = any(w in t for w in [
         "code", "function", "구현", "fix bug", "run", "execute", "verify",
-        "verifier", "validate", "validation", "실행", "검증", "script", "test"])
+        "verifier", "validate", "validation", "실행", "검증", "script", "test",
+        "marker", "event", "engine", "이벤트", "엔진"])
+    # 영어 키워드는 단어경계로 매칭해 'implementation_plan' 같은 식별자 부분일치를 막는다.
+    plan_signal = (re.search(r"\b(plan|design only)\b", t) is not None
+                   or "설계만" in t or "계획" in t)
+    research_signal = (re.search(r"\b(research|investigate)\b", t) is not None
+                       or "조사" in t)
     doc_signal = (re.search(r"\b(documentation|readme|docstring|changelog)\b", t)
                   is not None) or "문서" in t or "주석" in t or "comment only" in t
+    if plan_signal and not code_signal:
+        return "planning"
+    if research_signal and not code_signal:
+        return "research"
     if doc_signal and not code_signal:
         return "docs_only"
     return "code_change"

@@ -14,6 +14,18 @@ def test_detect_task_type_run_not_docs():
     assert _detect_task_type("문서 작성만 한다") == "docs_only"
 
 
+def test_detect_task_type_plan_filename_not_planning():
+    # 회귀: 'IMPLEMENTATION_PLAN' 파일명 언급의 'plan' substring으로 구현 작업이
+    # planning으로 오탐되면 안 된다(코드 신호가 있으면 code_change).
+    assert _detect_task_type(
+        "add religion_founded marker to phase0_engine.py, create verify_phase5a.py, "
+        "add section to PHASE_5_IMPLEMENTATION_PLAN.md") == "code_change"
+    # 진짜 계획/조사 작업은 코드 신호가 없으면 그대로 분류된다.
+    assert _detect_task_type("Plan the Phase 6 architecture") == "planning"
+    assert _detect_task_type("계획만 세운다") == "planning"
+    assert _detect_task_type("Investigate the slow startup") == "research"
+
+
 def _run(project, task, config, profile="standard"):
     return run_preflight(project_path=project, task=task, profile=profile,
                          config=config, provider=MockProvider())

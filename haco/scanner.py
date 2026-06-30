@@ -170,6 +170,10 @@ def _keyword_matches(keywords: list[str], file_paths: list[str]) -> list[str]:
     # - df로 나눔: 여러 파일에 흔히 등장하는 키워드("docs","validation")는 약하게,
     #   소수 파일에만 맞는 희귀 키워드("verify_phase2f")는 강하게.
     # 등장 순서가 아니라 이 점수로 정렬해야 실제 타깃이 흔한 키워드 매칭에 묻히지 않는다.
+    # 편집 가능성이 낮은 archive/deprecated/vendor 경로는 점수를 낮춰 live 파일에 밀리게 한다
+    # (목록에선 유지하되 상위 files_to_read를 닫힌/과거 문서가 잠식하지 않도록).
+    downrank = ("/archive/", "archive/", "/deprecated/", "deprecated/",
+                "/vendor/", "vendor/", "/third_party/", "third_party/")
     lowered = [(p, p.lower()) for p in file_paths]
     kws = [k.lower() for k in keywords if k]
     df = {k: sum(1 for _, low in lowered if k in low) for k in kws}
@@ -180,6 +184,8 @@ def _keyword_matches(keywords: list[str], file_paths: list[str]) -> list[str]:
             if df.get(k) and k in low:
                 score += len(k) / df[k]
         if score:
+            if low.startswith(("archive/", "deprecated/")) or any(s in low for s in downrank):
+                score *= 0.2
             scored.append((score, orig))
     scored.sort(key=lambda x: (-x[0], x[1]))  # 점수 desc, path asc (결정적)
     return [orig for _, orig in scored[:30]]

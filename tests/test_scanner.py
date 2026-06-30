@@ -30,6 +30,18 @@ def test_keyword_matches_relevance_ranking():
     assert out.index("verify_phase2f.py") < out.index("GODSEED_MASTER_PLAN.md")
 
 
+def test_keyword_matches_downranks_archive():
+    # 회귀: 닫힌/과거 문서(docs/archive/...)는 동일 키워드를 맞춰도 live 파일보다 뒤로 밀린다.
+    files = ["docs/archive/phase4/PHASE_4_IMPLEMENTATION_PLAN.md",
+             "verify_phase5a.py", "phase0_engine.py"]
+    kws = ["phase", "verify_phase5a"]
+    out = _keyword_matches(kws, files)
+    assert out[0] == "verify_phase5a.py"
+    # archive 문서는 목록엔 남되 live 파일보다 뒤.
+    arch = "docs/archive/phase4/PHASE_4_IMPLEMENTATION_PLAN.md"
+    assert out.index("verify_phase5a.py") < out.index(arch)
+
+
 def test_snapshot_basic_fields(sample_project, config):
     snap = scan_project(sample_project, "add subtract", config)
     assert snap["primary_language"] == "python"
