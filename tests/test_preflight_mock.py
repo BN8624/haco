@@ -1,8 +1,17 @@
 # preflight: mock provider end-to-end 산출물 생성과 profile.
 import json
 
-from haco.model_client import MockProvider
+from haco.model_client import MockProvider, _detect_task_type
 from haco.preflight import run_preflight
+
+
+def test_detect_task_type_run_not_docs():
+    # 회귀: 실행/검증 작업이 "doc" substring(docs/archive)으로 docs_only 오탐되면 안 된다.
+    assert _detect_task_type(
+        "Run the validation and verify results, see docs/archive") == "code_change"
+    # 진짜 문서 작업은 여전히 docs_only.
+    assert _detect_task_type("Update the README documentation") == "docs_only"
+    assert _detect_task_type("문서 작성만 한다") == "docs_only"
 
 
 def _run(project, task, config, profile="standard"):

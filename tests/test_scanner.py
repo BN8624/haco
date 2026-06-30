@@ -1,5 +1,15 @@
 # scanner: project_snapshot 생성, ignore_dirs, 언어/타입/프레임워크 감지.
-from haco.scanner import scan_project
+from haco.scanner import _keyword_matches, scan_project
+
+
+def test_keyword_matches_relevance_ranking():
+    # 회귀: 구체적 키워드에 맞는 파일이 일반 키워드에만 맞는 파일보다 앞서야 한다.
+    files = ["GODSEED_MASTER_PLAN.md", "verify_phase0.py", "verify_phase2f.py"]
+    kws = ["GODSEED", "phase2f", "verify_phase2f"]
+    out = _keyword_matches(kws, files)
+    assert out[0] == "verify_phase2f.py"
+    assert "GODSEED_MASTER_PLAN.md" in out
+    assert out.index("verify_phase2f.py") < out.index("GODSEED_MASTER_PLAN.md")
 
 
 def test_snapshot_basic_fields(sample_project, config):

@@ -155,14 +155,24 @@ def _extract_keywords(task: str) -> list[str]:
 
 
 def _keyword_matches(keywords: list[str], file_paths: list[str]) -> list[str]:
-    matches: list[str] = []
+    # 관련도순 정렬. 점수 = Σ (키워드 길이 / 해당 키워드의 document-frequency).
+    # - 길이: 구체적인(긴) 키워드일수록 강하게.
+    # - df로 나눔: 여러 파일에 흔히 등장하는 키워드("docs","validation")는 약하게,
+    #   소수 파일에만 맞는 희귀 키워드("verify_phase2f")는 강하게.
+    # 등장 순서가 아니라 이 점수로 정렬해야 실제 타깃이 흔한 키워드 매칭에 묻히지 않는다.
     lowered = [(p, p.lower()) for p in file_paths]
-    for kw in keywords:
-        k = kw.lower()
-        for orig, low in lowered:
-            if k in low and orig not in matches:
-                matches.append(orig)
-    return matches[:30]
+    kws = [k.lower() for k in keywords if k]
+    df = {k: sum(1 for _, low in lowered if k in low) for k in kws}
+    scored: list[tuple[float, str]] = []
+    for orig, low in lowered:
+        score = 0.0
+        for k in kws:
+            if df.get(k) and k in low:
+                score += len(k) / df[k]
+        if score:
+            scored.append((score, orig))
+    scored.sort(key=lambda x: (-x[0], x[1]))  # 점수 desc, path asc (결정적)
+    return [orig for _, orig in scored[:30]]
 
 
 def scan_project(project_path: Path, task: str, config: Config) -> dict:

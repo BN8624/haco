@@ -41,8 +41,14 @@ def _detect_task_type(task: str) -> str:
         return "planning"
     if any(w in t for w in ["research", "investigate", "조사"]):
         return "research"
-    if any(w in t for w in ["doc", "readme", "문서", "주석", "comment only"]) and \
-            not any(w in t for w in ["code", "function", "구현", "fix bug"]):
+    # 실행/검증/구현 신호가 있으면 docs_only가 아니다.
+    # (이전엔 "doc" substring이 "docs/archive" 같은 경로 언급에 오탐했다.)
+    code_signal = any(w in t for w in [
+        "code", "function", "구현", "fix bug", "run", "execute", "verify",
+        "verifier", "validate", "validation", "실행", "검증", "script", "test"])
+    doc_signal = (re.search(r"\b(documentation|readme|docstring|changelog)\b", t)
+                  is not None) or "문서" in t or "주석" in t or "comment only" in t
+    if doc_signal and not code_signal:
         return "docs_only"
     return "code_change"
 
