@@ -16,6 +16,17 @@ bounded_exploration_needed: yes/no
 reason:
 ```"""
 
+_DEFAULT_RUN = ".haco/runs/latest"
+_DEFAULT_PROJECT = "."
+
+
+def build_postflight_command(run_path: str | Path | None,
+                             project_path: str | None) -> str:
+    """완성된 postflight 명령 문자열을 만든다. 인자가 비면 기본값으로 채워 빈 인자를 막는다."""
+    run = (str(run_path).strip() if run_path is not None else "") or _DEFAULT_RUN
+    proj = (str(project_path).strip() if project_path is not None else "") or _DEFAULT_PROJECT
+    return f"python -m haco postflight --run {run} --project {proj}"
+
 
 def build_execution_brief(packet: TaskPacket, metas: list[CandidateMetadata],
                           run_path: Path) -> str:
@@ -81,8 +92,7 @@ def build_execution_brief(packet: TaskPacket, metas: list[CandidateMetadata],
     lines.append("- Write `diff_summary.md`.")
     lines.append("- If tests ran, write `test_log.txt`.")
     lines.append("- If tests were skipped, write `tests_skipped.md`.")
-    lines.append("- Then run "
-                 "`python -m haco postflight --run <this_run_dir> --project <project_path>`.")
+    lines.append(f"- Then run `{build_postflight_command(_DEFAULT_RUN, packet.project_path)}`.")
     lines.append("- Keep final report short.")
     lines.append("")
 

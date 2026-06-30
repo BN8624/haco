@@ -1,7 +1,60 @@
 # candidate_store: candidate 디렉터리 저장, hard filtering, rejected 격리.
+import json
+
 from haco.candidate_store import (apply_hard_filter, build_candidate_summary,
                                   write_patch_candidate, write_test_candidate)
 from haco.run_store import create_run
+
+_BASE = {"candidate_id": "candidate_01", "_target_files": ["pkg/calc.py"],
+         "_language": "python", "preferred_apply_method": "search_replace",
+         "summary": "s", "risk": "low", "reason": "x"}
+
+
+def test_patch_candidate_real_search_replace(tmp_path):
+    run = create_run(tmp_path)
+    out = {**_BASE, "search_replace_edits": [
+        {"file": "pkg/calc.py", "operation": "replace",
+         "search": "def add(a, b): return a",
+         "replace": "def add(a, b): return a + b", "notes": "fix"}]}
+    write_patch_candidate(run, out)
+    data = json.loads((run / "candidates" / "candidate_01" / "search_replace.json")
+                      .read_text(encoding="utf-8"))
+    assert data["edits"][0]["search"] == "def add(a, b): return a"
+    assert data["edits"][0]["replace"] == "def add(a, b): return a + b"
+    assert "<<<" not in json.dumps(data)  # placeholder 아님
+
+
+def test_patch_candidate_real_replacement_blocks(tmp_path):
+    run = create_run(tmp_path)
+    out = {**_BASE, "preferred_apply_method": "full_block", "replacement_blocks": [
+        {"file": "pkg/calc.py", "target": "add", "language": "python",
+         "code": "def add(a, b):\n    return a + b",
+         "apply_method": "replace entire function"}]}
+    write_patch_candidate(run, out)
+    md = (run / "candidates" / "candidate_01" / "replacement_blocks.md") \
+        .read_text(encoding="utf-8")
+    assert "def add(a, b):" in md
+    assert "return a + b" in md
+    assert "insert verified replacement here" not in md  # skeleton 아님
+
+
+def test_patch_candidate_real_edit_plan(tmp_path):
+    run = create_run(tmp_path)
+    out = {**_BASE, "edit_plan": "1. open calc.py\n2. fix add()"}
+    write_patch_candidate(run, out)
+    md = (run / "candidates" / "candidate_01" / "edit_plan.md").read_text(encoding="utf-8")
+    assert "1. open calc.py" in md
+    assert "Notes for the main agent" not in md  # skeleton 헤더 아님
+
+
+def test_patch_candidate_fallback_skeleton_when_empty(tmp_path):
+    run = create_run(tmp_path)
+    write_patch_candidate(run, dict(_BASE))
+    sr = json.loads((run / "candidates" / "candidate_01" / "search_replace.json")
+                    .read_text(encoding="utf-8"))
+    assert "<<<" in sr["edits"][0]["search"]  # skeleton placeholder 유지
+    md = (run / "candidates" / "candidate_01" / "edit_plan.md").read_text(encoding="utf-8")
+    assert "Notes for the main agent" in md  # skeleton 유지
 
 
 def test_write_patch_candidate_files(tmp_path):

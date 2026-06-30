@@ -40,6 +40,24 @@ class FileLocatorOutput(WorkerBase):
     confidence: Confidence = "low"
 
 
+class SearchReplaceEdit(BaseModel):
+    model_config = {"extra": "allow"}
+    file: str = ""
+    operation: str = "replace"  # replace | insert_after_anchor | insert_before_anchor
+    search: str = ""
+    replace: str = ""
+    notes: str = ""
+
+
+class ReplacementBlock(BaseModel):
+    model_config = {"extra": "allow"}
+    file: str = ""
+    target: str = ""
+    language: str = "unknown"
+    code: str = ""
+    apply_method: str = "replace entire function"
+
+
 class PatchCandidateOutput(WorkerBase):
     worker: str = "patch_candidate"
     candidate_id: str = "candidate_01"
@@ -48,6 +66,10 @@ class PatchCandidateOutput(WorkerBase):
     summary: str = ""
     risk: Risk = "medium"
     assumptions: list[str] = Field(default_factory=list)
+    # 실제 Gemma 코드 후보 내용. 비어 있으면 candidate_store가 skeleton으로 폴백한다.
+    edit_plan: str | None = None
+    search_replace_edits: list[SearchReplaceEdit] = Field(default_factory=list)
+    replacement_blocks: list[ReplacementBlock] = Field(default_factory=list)
 
 
 class TestCandidateOutput(WorkerBase):

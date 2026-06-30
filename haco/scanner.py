@@ -142,15 +142,25 @@ def _recent_files(project_path: Path, file_paths: list[str], n: int = 15) -> lis
 
 
 def _extract_keywords(task: str) -> list[str]:
-    tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", task)
+    # 한글/영문/숫자/underscore 혼합 토큰을 추출한다. phase2f, ticks10000, 10k 같은
+    # 혼합 패턴과 한국어 작업 지시(검증, 문서 등)를 살리되, 영어 식별자 동작은 보존한다.
+    tokens = re.findall(r"[가-힣A-Za-z0-9_]+", task)
     stop = {"the", "and", "for", "add", "fix", "use", "this", "that", "with",
             "into", "from", "should", "must", "make", "run", "test", "tests"}
     out: list[str] = []
     for t in tokens:
-        low = t.lower()
-        if low in stop or len(t) < 3:
+        s = t.strip("_")
+        if not s or not any(c.isalnum() for c in s) or len(s) > 40:
+            continue  # 빈 토큰/언더스코어 잡음/과도하게 긴 토큰 제외
+        low = s.lower()
+        if low in stop:
             continue
-        out.append(t)
+        has_digit = any(c.isdigit() for c in s)
+        has_hangul = any("가" <= c <= "힣" for c in s)
+        # 한글·혼합(숫자 포함) 토큰은 짧아도 의미가 있어 유지. 순수 영문은 기존대로 3자 이상.
+        if not (has_hangul or has_digit) and len(s) < 3:
+            continue
+        out.append(s)
     return list(dict.fromkeys(out))[:20]
 
 

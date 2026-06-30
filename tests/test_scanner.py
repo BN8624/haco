@@ -1,5 +1,23 @@
 # scanner: project_snapshot 생성, ignore_dirs, 언어/타입/프레임워크 감지.
-from haco.scanner import _keyword_matches, scan_project
+from haco.scanner import _extract_keywords, _keyword_matches, scan_project
+
+
+def test_extract_keywords_korean_mixed():
+    # 한국어 작업 지시 + 혼합 토큰이 모두 추출돼야 한다.
+    kws = _extract_keywords("갓시드 phase2f ticks10000 검증 결과 문서 갱신")
+    for expected in ["갓시드", "phase2f", "ticks10000", "검증", "결과", "문서", "갱신"]:
+        assert expected in kws
+
+
+def test_extract_keywords_preserves_english_and_filters_noise():
+    # 영어 식별자 추출 동작 보존 + stopword/짧은 잡음 필터.
+    kws = _extract_keywords("update verify_phase2f and config loader to 10k")
+    assert "verify_phase2f" in kws
+    assert "config" in kws
+    assert "loader" in kws
+    assert "10k" in kws          # 숫자 혼합 유지
+    assert "and" not in kws      # stopword
+    assert "to" not in kws       # 2자 순수 영문 잡음
 
 
 def test_keyword_matches_relevance_ranking():

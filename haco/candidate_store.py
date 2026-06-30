@@ -13,6 +13,15 @@ def _candidates_dir(run_path: Path) -> Path:
     return d
 
 
+def _as_dict(item) -> dict:
+    """worker output의 항목을 dict로 정규화한다(model_dump 결과는 이미 dict)."""
+    if isinstance(item, dict):
+        return item
+    if hasattr(item, "model_dump"):
+        return item.model_dump()
+    return {}
+
+
 def write_patch_candidate(run_path: Path, output: dict) -> CandidateMetadata:
     """patch_candidate worker 출력으로 candidate 디렉터리를 만든다."""
     cid = output.get("candidate_id", "candidate_01")
@@ -39,31 +48,51 @@ def write_patch_candidate(run_path: Path, output: dict) -> CandidateMetadata:
     )
     write_json(cdir / "candidate.json", meta.model_dump())
 
-    # edit_plan.md (항상)
-    plan_lines = [
-        f"# Edit Plan: {cid}",
-        "",
-        f"## Goal", summary or "(see task)",
-        "",
-        "## Target files",
-    ]
-    if targets:
-        plan_lines += [f"- `{t}`" for t in targets]
-    else:
-        plan_lines.append("- (uncertain — strategy only)")
-    plan_lines += [
-        "",
-        "## Apply order",
-        f"- preferred method: {method}",
-        "",
-        "## Notes for the main agent",
-        "- Review before applying. HACO does not apply this directly.",
-        "- Prefer edit_plan/search_replace/replacement_blocks over optional.diff.",
-    ]
-    write_text(cdir / "edit_plan.md", "\n".join(plan_lines) + "\n")
+    # 실제 worker 후보 내용(있으면 보존, 없으면 skeleton 폴백)
+    edit_plan = (output.get("edit_plan") or "").strip()
+    sr_edits = output.get("search_replace_edits") or []
+    repl_blocks = output.get("replacement_blocks") or []
 
-    # search_replace.json (타겟이 있을 때만 의미있는 골격)
-    if targets:
+    # edit_plan.md — 실제 plan이 있으면 그대로, 없으면 기존 skeleton
+    if edit_plan:
+        write_text(cdir / "edit_plan.md", f"# Edit Plan: {cid}\n\n{edit_plan}\n")
+    else:
+        plan_lines = [
+            f"# Edit Plan: {cid}",
+            "",
+            f"## Goal", summary or "(see task)",
+            "",
+            "## Target files",
+        ]
+        if targets:
+            plan_lines += [f"- `{t}`" for t in targets]
+        else:
+            plan_lines.append("- (uncertain — strategy only)")
+        plan_lines += [
+            "",
+            "## Apply order",
+            f"- preferred method: {method}",
+            "",
+            "## Notes for the main agent",
+            "- Review before applying. HACO does not apply this directly.",
+            "- Prefer edit_plan/search_replace/replacement_blocks over optional.diff.",
+        ]
+        write_text(cdir / "edit_plan.md", "\n".join(plan_lines) + "\n")
+
+    # search_replace.json — 실제 edit이 있으면 그대로, 없고 target만 있으면 skeleton
+    if sr_edits:
+        edits = []
+        for e in sr_edits:
+            e = _as_dict(e)
+            edits.append({
+                "file": e.get("file", ""),
+                "operation": e.get("operation", "replace"),
+                "search": e.get("search", ""),
+                "replace": e.get("replace", ""),
+                "notes": e.get("notes", ""),
+            })
+        write_json(cdir / "search_replace.json", {"edits": edits})
+    elif targets:
         write_json(cdir / "search_replace.json", {
             "edits": [
                 {
@@ -75,6 +104,22 @@ def write_patch_candidate(run_path: Path, output: dict) -> CandidateMetadata:
                 }
             ]
         })
+
+    # replacement_blocks.md — 실제 block이 있으면 그대로, 없고 target만 있으면 skeleton
+    if repl_blocks:
+        blocks_md: list[str] = []
+        for i, b in enumerate(repl_blocks, 1):
+            b = _as_dict(b)
+            blang = b.get("language", "unknown")
+            fence = blang if blang and blang != "unknown" else ""
+            blocks_md.append(
+                f"## Replacement {i}\n\n"
+                f"File: {b.get('file', '')}  \n"
+                f"Target: {b.get('target', '')}  \n"
+                f"Apply method: {b.get('apply_method', 'replace entire function')}\n\n"
+                f"```{fence}\n{b.get('code', '')}\n```\n")
+        write_text(cdir / "replacement_blocks.md", "\n".join(blocks_md))
+    elif targets:
         write_text(cdir / "replacement_blocks.md",
                    f"## Replacement 1\n\nFile: {targets[0]}  \n"
                    f"Target: (function/class to identify)  \n"

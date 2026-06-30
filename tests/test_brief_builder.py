@@ -1,7 +1,24 @@
 # brief_builder: mandatory first step, validation, accepted only, postflight 지시.
-from haco.brief_builder import build_execution_brief
+from haco.brief_builder import build_execution_brief, build_postflight_command
 from haco.run_store import create_run
 from haco.schemas import CandidateMetadata, TaskPacket
+
+
+def test_postflight_command_defaults_on_empty():
+    # 빈 인자는 기본값으로 채워 빈 자리(--run  --project )가 생기지 않는다.
+    cmd = build_postflight_command("", "")
+    assert cmd == "python -m haco postflight --run .haco/runs/latest --project ."
+    assert build_postflight_command(None, None) == cmd
+    assert "--run  " not in cmd
+
+
+def test_brief_postflight_command_is_complete(tmp_path):
+    run = create_run(tmp_path)
+    packet = TaskPacket(run_id="r1", project_path="")
+    brief = build_execution_brief(packet, [], run)
+    assert "python -m haco postflight --run .haco/runs/latest --project ." in brief
+    assert "--run  --project " not in brief
+    assert "<this_run_dir>" not in brief
 
 
 def _meta(cid, status):
