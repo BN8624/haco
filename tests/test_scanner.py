@@ -1,4 +1,9 @@
 # scanner: project_snapshot 생성, ignore_dirs, 언어/타입/프레임워크 감지.
+import shutil
+import subprocess
+
+import pytest
+
 from haco.scanner import _extract_keywords, _keyword_matches, scan_project
 
 
@@ -68,6 +73,19 @@ def test_important_files_detected(sample_project, config):
 def test_keyword_matches(sample_project, config):
     snap = scan_project(sample_project, "modify calc module", config)
     assert any("calc" in p for p in snap["keyword_file_matches"])
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+def test_scan_respects_gitignore(tmp_path, config):
+    # git이 무시하는 root scratch 산출물은 file_paths_sample/keyword_matches에서 제외돼야 한다.
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("/phase_scratch_*.json\n", encoding="utf-8")
+    (tmp_path / "engine.py").write_text("# real source\nx = 1\n", encoding="utf-8")
+    (tmp_path / "phase_scratch_summary.json").write_text("{}", encoding="utf-8")
+    snap = scan_project(tmp_path, "edit engine marker", config)
+    paths = snap["file_paths_sample"]
+    assert "engine.py" in paths
+    assert "phase_scratch_summary.json" not in paths
 
 
 def test_unknown_language(empty_project, config):

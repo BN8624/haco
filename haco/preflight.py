@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import time
 from pathlib import Path
 
@@ -37,6 +38,54 @@ def _patch_test_suppressed(task_type: str, risk: str) -> bool:
     if task_type in ("docs_only", "planning", "research"):
         return True
     return False
+
+
+def _prior_change_reference(project_path: Path, files_to_edit: list[str],
+                            task_type: str, run_path: Path, max_chars: int) -> str:
+    """편집 대상 파일을 마지막으로 바꾼 커밋 diff를 참조 파일로 쓰고 그 rel 경로를 반환한다.
+
+    반복 증분 작업(예: marker chain)에서 "직전에 비슷한 변경이 어떻게 됐는지" 템플릿을
+    제공한다. git/커밋 이력이 없거나 code 변경 작업이 아니면 빈 문자열(아무 것도 안 씀).
+    결정적: 동일 repo 상태면 동일 출력. provider 비의존.
+    """
+    if task_type not in ("code_change", "refactor", "test_failure"):
+        return ""
+    if not files_to_edit:
+        return ""
+    target = files_to_edit[0]
+
+    def _git(*args: str) -> tuple[int, str]:
+        try:
+            p = subprocess.run(["git", "-C", str(project_path), *args],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=15)
+            return p.returncode, p.stdout
+        except Exception:
+            return 1, ""
+
+    rc, out = _git("log", "-1", "--format=%H%x1f%s", "--", target)
+    if rc != 0 or not out.strip():
+        return ""
+    commit, _, subject = out.strip().partition("\x1f")
+    rc, diff = _git("show", "--stat", "--patch", commit)
+    if rc != 0 or not diff.strip():
+        return ""
+
+    truncated = ""
+    if len(diff) > max_chars:
+        diff = diff[:max_chars]
+        truncated = "\n…(diff truncated by HACO budget)…\n"
+
+    body = (
+        "# Prior change reference\n\n"
+        f"The most recent commit that modified `{target}` was below. "
+        "This is how a similar change was made before — use it as a **template**, "
+        "adapt it to this task, and do not blindly copy.\n\n"
+        f"- commit: `{commit}`\n- subject: {subject}\n\n"
+        "```diff\n" + diff + truncated + "\n```\n"
+    )
+    write_text(run_path / "prior_change_reference.md", body)
+    return "prior_change_reference.md"
 
 
 def run_preflight(*, project_path: Path, task: str, profile: str,
@@ -200,13 +249,21 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
     metas = apply_hard_filter(run_path, metas, judge, snapshot)
     candidate_summary = build_candidate_summary(metas, judge)
 
+    # ---- prior change reference (git 기반, 반복 증분 템플릿) ----
+    prior_ref = ""
+    if not skip:
+        max_ref = config.get("budgets", "max_candidate_total_chars", default=40000)
+        prior_ref = _prior_change_reference(
+            project_path, locator.get("files_to_edit", []) or [],
+            task_type, run_path, max_ref)
+
     # ---- aggregate ----
     packet = build_task_packet(
         run_id=run_path.name, project_path=str(project_path), outputs=outputs,
         core_failed=core_failed, skip=skip, skip_reason=skip_reason,
         locator_passes=locator_passes, locator_rescan_applied=rescan_applied,
         locator_rescan_notes=rescan_notes, candidate_summary=candidate_summary,
-        suggested_improvement=suggested,
+        suggested_improvement=suggested, prior_change_reference=prior_ref,
     )
     write_json(run_path / "task_packet.json", packet.model_dump())
 

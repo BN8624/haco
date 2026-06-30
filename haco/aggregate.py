@@ -30,7 +30,8 @@ def build_task_packet(*, run_id: str, project_path: str, outputs: dict[str, dict
                       locator_passes: int, locator_rescan_applied: bool,
                       locator_rescan_notes: list[str],
                       candidate_summary: CandidateSummary | None,
-                      suggested_improvement: str = "") -> TaskPacket:
+                      suggested_improvement: str = "",
+                      prior_change_reference: str = "") -> TaskPacket:
     router = outputs.get("task_router", {})
     compressor = outputs.get("context_compressor", {})
     locator = outputs.get("file_locator", {})
@@ -77,6 +78,7 @@ def build_task_packet(*, run_id: str, project_path: str, outputs: dict[str, dict
         docs_to_update=doc.get("docs_to_update", []) or [],
         new_doc_needed=bool(doc.get("new_doc_needed", False)),
         candidate_summary=candidate_summary or CandidateSummary(),
+        prior_change_reference=prior_change_reference,
         constraints=compressor.get("known_constraints", []) or [],
         assumptions=compressor.get("assumptions", []) or [],
         recommended_action=recommended_action,

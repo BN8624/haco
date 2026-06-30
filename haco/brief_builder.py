@@ -76,6 +76,9 @@ def build_execution_brief(packet: TaskPacket, metas: list[CandidateMetadata],
     lines.append("- Read `task_packet.json` first.")
     lines.append("- Read the suggested files first.")
     lines.append("- Check accepted candidates before writing a patch from scratch.")
+    if packet.prior_change_reference:
+        lines.append(f"- Read `{packet.prior_change_reference}` — the prior similar change "
+                     f"to your edit target; use it as a template, not a blind copy.")
     lines.append("- If a candidate is usable, apply or adapt it.")
     lines.append("- If a candidate is wrong, do not blindly follow it.")
     lines.append("- Do not treat `optional.diff` as the primary source of truth.")

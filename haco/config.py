@@ -70,6 +70,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "include_recent_files": True,
         "include_readme_preview": True,
         "include_repo_map": True,
+        "respect_gitignore": True,
         "ignore_dirs": [
             ".git", ".haco", ".venv", "venv", "node_modules",
             "__pycache__", "dist", "build",

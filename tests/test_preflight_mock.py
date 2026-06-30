@@ -1,8 +1,12 @@
 # preflight: mock provider end-to-end 산출물 생성과 profile.
 import json
+import shutil
+import subprocess
+
+import pytest
 
 from haco.model_client import MockProvider, _detect_task_type
-from haco.preflight import run_preflight
+from haco.preflight import _prior_change_reference, run_preflight
 
 
 def test_detect_task_type_run_not_docs():
@@ -29,6 +33,42 @@ def test_detect_task_type_plan_filename_not_planning():
 def _run(project, task, config, profile="standard"):
     return run_preflight(project_path=project, task=task, profile=profile,
                          config=config, provider=MockProvider())
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not available")
+def test_prior_change_reference_from_git(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=repo, check=True)
+    eng = repo / "engine.py"
+    eng.write_text("x = 1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "feat: add marker pass"], cwd=repo, check=True)
+    eng.write_text("x = 1\ny = 2  # marker\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "feat: extend marker pass"], cwd=repo, check=True)
+
+    run = tmp_path / "run"
+    run.mkdir()
+    rel = _prior_change_reference(repo, ["engine.py"], "code_change", run, 40000)
+    assert rel == "prior_change_reference.md"
+    body = (run / "prior_change_reference.md").read_text(encoding="utf-8")
+    assert "extend marker pass" in body  # 가장 최근 커밋 subject
+    assert "engine.py" in body and "```diff" in body
+
+    # code 변경이 아니거나 편집 대상이 없으면 아무것도 안 쓴다.
+    assert _prior_change_reference(repo, ["engine.py"], "planning", run, 40000) == ""
+    assert _prior_change_reference(repo, [], "code_change", run, 40000) == ""
+
+
+def test_prior_change_reference_no_git(tmp_path):
+    # git 이력이 없는 디렉터리는 빈 문자열(크래시 없음).
+    d = tmp_path / "nogit"
+    d.mkdir()
+    (d / "engine.py").write_text("x=1\n", encoding="utf-8")
+    assert _prior_change_reference(d, ["engine.py"], "code_change", d, 40000) == ""
 
 
 def test_preflight_creates_all_outputs(sample_project, config):

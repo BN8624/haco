@@ -159,6 +159,8 @@ class TaskPacket(BaseModel):
     docs_to_update: list[str] = Field(default_factory=list)
     new_doc_needed: bool = False
     candidate_summary: CandidateSummary = Field(default_factory=CandidateSummary)
+    # 직전에 동일 파일을 바꾼 커밋 diff 참조 파일(반복 증분 작업의 템플릿). 없으면 빈 문자열.
+    prior_change_reference: str = ""
     constraints: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     recommended_action: str = ""

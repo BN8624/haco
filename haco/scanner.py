@@ -115,6 +115,31 @@ def _detect_test_frameworks(project_path: Path, important: list[str],
     return list(dict.fromkeys(fw))
 
 
+def _git_ignored_paths(project_path: Path, file_paths: list[str]) -> set[str]:
+    """git check-ignore로 무시되는 rel 경로 집합을 반환. git이 없거나 repo가 아니면 빈 집합.
+
+    한 번의 `git check-ignore --stdin` 호출로 전체 경로를 일괄 판정한다(파일당 호출 금지).
+    종료코드 0=일부 무시, 1=무시 없음, 그 외(128 등)=repo 아님/오류 → 필터 미적용.
+    """
+    if not file_paths:
+        return set()
+    # -z(NUL 구분) + bytes로 호출한다. text 모드는 Windows에서 stdin의 \n을 \r\n으로 바꿔
+    # git이 경로에 \r를 포함시키고 core.quotePath로 따옴표까지 씌워 매칭이 깨진다. -z는 양방향
+    # NUL 구분이라 그 변환/따옴표 문제가 없다.
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(project_path), "check-ignore", "-z", "--stdin"],
+            input="\0".join(file_paths).encode("utf-8"),
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        return set()
+    if proc.returncode not in (0, 1):
+        return set()
+    out = proc.stdout.decode("utf-8", "replace")
+    return {p.replace("\\", "/") for p in out.split("\0") if p}
+
+
 def _git_status(project_path: Path) -> str:
     try:
         out = subprocess.run(
@@ -200,6 +225,12 @@ def scan_project(project_path: Path, task: str, config: Config) -> dict:
     max_files = config.get("limits", "max_files_in_snapshot", default=300)
 
     file_paths = _iter_files(project_path, ignore_dirs, max_files)
+    # gitignore 산출물(예: root scratch *_summary.json)은 편집 대상이 아니므로 제외해
+    # keyword_matches/files_to_read 노이즈를 줄인다. git 없으면 무필터.
+    if sc.get("respect_gitignore", True):
+        ignored = _git_ignored_paths(project_path, file_paths)
+        if ignored:
+            file_paths = [p for p in file_paths if p not in ignored]
     important = [p for p in file_paths if Path(p).name in IMPORTANT_NAMES]
     important_names = [Path(p).name for p in important]
 
