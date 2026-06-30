@@ -57,12 +57,16 @@ def _detect_test_outcome(run_path: Path) -> tuple[bool, bool | None]:
         log = read_text(test_log).lower()
         if not log.strip():
             return True, None
-        failed = any(w in log for w in ["failed", "error", "traceback",
-                                        "assertionerror", "fail"])
-        passed = any(w in log for w in ["passed", "ok", "0 failed", "success"])
-        if failed and not passed:
+        # pytest 요약의 'N failed' / 'N error(s)'를 우선 신뢰한다. 통과 테스트와 공존해도
+        # ('1 failed, 71 passed') 카운트로 정확히 판정된다. 0이면 통과, >0이면 실패.
+        fail_counts = [int(n) for n in re.findall(r"(\d+)\s+(?:failed|errors?)", log)]
+        if fail_counts:
+            return True, sum(fail_counts) == 0
+        # 카운트가 없으면 명시적 실패 마커로 판정한다. 단독 'error'/'fail'은 테스트명 오탐이
+        # 잦아 제외하고, 강한 신호만 쓴다.
+        if any(w in log for w in ("failed", "traceback", "assertionerror")):
             return True, False
-        if passed and not failed:
+        if "passed" in log or "success" in log or re.search(r"\bok\b", log):
             return True, True
         return True, None
     if skipped.exists():
