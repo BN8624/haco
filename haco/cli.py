@@ -100,10 +100,10 @@ def cmd_run(args) -> int:
 
 def cmd_postflight(args) -> int:
     from haco.postflight import run_postflight
-    run_path = resolve_run(args.run)
+    project_path = Path(getattr(args, "project", None) or ".").resolve()
+    run_path = resolve_run(args.run, project_path)
     if not Path(run_path).exists():
         _die(f"run path not found: {args.run}")
-    project_path = Path(getattr(args, "project", None) or ".").resolve()
     load_env(project_path)
     config = load_config(getattr(args, "config", None), project_path=project_path)
     provider = get_provider(config)
@@ -120,8 +120,8 @@ def cmd_postflight(args) -> int:
 
 
 def cmd_show(args) -> int:
-    run_path = resolve_run(args.run)
-    run_path = Path(run_path)
+    project_path = Path(getattr(args, "project", None) or ".").resolve()
+    run_path = Path(resolve_run(args.run, project_path))
     if not run_path.exists():
         _die(f"run path not found: {args.run}")
     packet = read_json(run_path / "task_packet.json", default={}) or {}
@@ -215,6 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("show", help="show a run summary")
     sp.add_argument("run")
+    sp.add_argument("--project", default=".")
     sp.set_defaults(func=cmd_show)
 
     sp = sub.add_parser("bootstrap", help="run the 11-key design review (mock/google)")

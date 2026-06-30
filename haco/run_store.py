@@ -85,13 +85,8 @@ def _update_latest(root: Path, run_path: Path) -> None:
     write_text(latest / LATEST_MARKER, run_path.name)
 
 
-def resolve_run(run_arg: str | Path) -> Path:
-    """show/postflight가 받은 run 경로를 실제 run 디렉터리로 해석한다.
-
-    - symlink면 따라간다.
-    - marker 디렉터리면 marker가 가리키는 형제 디렉터리로 해석한다.
-    """
-    p = Path(run_arg)
+def _resolve_existing(p: Path) -> Path | None:
+    """존재하는 경로면 symlink/marker를 따라 실제 run 디렉터리를 반환. 없으면 None."""
     if p.is_symlink():
         return p.resolve()
     if p.is_dir():
@@ -103,4 +98,24 @@ def resolve_run(run_arg: str | Path) -> Path:
                 if resolved.exists():
                     return resolved
         return p
-    return p
+    return None
+
+
+def resolve_run(run_arg: str | Path, project_path: Path | str | None = None,
+                runs_dir: str = ".haco/runs") -> Path:
+    """show/postflight가 받은 run 인자를 실제 run 디렉터리로 해석한다.
+
+    1) 인자가 직접 가리키는 경로(절대/상대 디렉터리·symlink·marker)면 그대로 해석한다.
+    2) 그렇지 않고 project_path가 주어지면 run ID나 'latest'로 보고
+       `<project>/.haco/runs/<run_arg>`에서 해석을 재시도한다(preflight 출력과 대칭).
+    못 찾으면 원본 경로를 반환해 호출부가 존재 여부로 실패를 알리게 한다.
+    """
+    direct = _resolve_existing(Path(run_arg))
+    if direct is not None:
+        return direct
+    if project_path is not None:
+        candidate = runs_root(Path(project_path), runs_dir) / str(run_arg)
+        resolved = _resolve_existing(candidate)
+        if resolved is not None:
+            return resolved
+    return Path(run_arg)
