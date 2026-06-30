@@ -84,18 +84,27 @@ After the main agent writes its results into the run directory:
 
 ```bash
 python -m haco postflight --run .haco/runs/latest --project .
+python -m haco postflight --run latest --project .       # same, by name
+python -m haco postflight --run 2026-07-01_002303 --project .  # by run ID
 ```
 
-Generates `report.md` and `postflight_packet.json`, parsing the `HACO Validation`
-section from `execution_result.md`. If a failure log is present it runs
-`failure_fixer` to produce a (non-applied) fix candidate.
+`--run` accepts a path, a run ID, or `latest`; a bare run ID or `latest` is resolved
+under `<--project>/.haco/runs/`. Generates `report.md` and `postflight_packet.json`,
+parsing the `HACO Validation` section from `execution_result.md`. If a failure log is
+present it runs `failure_fixer` to produce a (non-applied) fix candidate. The failure
+log is read from pytest-style `N failed` / `N error` counts, so a mixed summary like
+`1 failed, 71 passed` is correctly detected as a failure.
 
 ## run / show
 
 ```bash
 python -m haco run --project . --task "..."   # preflight + points agent to the brief
 python -m haco show .haco/runs/latest          # summarize a run
+python -m haco show latest --project .         # same, resolved by name
 ```
+
+`show` also takes a path, a run ID, or `latest` (run ID / `latest` resolved under
+`--project`, default `.`).
 
 ## How "use haco" works (agent procedure)
 

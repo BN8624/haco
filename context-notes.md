@@ -12,6 +12,8 @@
 - **latest 해석**: Windows symlink 권한 문제 가능 → symlink 시도, 실패 시 `latest`를 marker 파일(디렉터리명 기록)로 대체. `show .haco/runs/latest`가 두 방식 모두에서 동작.
 - **bootstrap**: 계약서 §32.4/§41.8에 따라 본체보다 키우지 않음. prompt 파일 + bootstrap.py 골격 + mock 테스트까지만. 실제 11-key 라이브 리뷰는 quota 소모 → 자동 실행하지 않음(옵션 경로만 제공).
 - **diff**: optional artifact. 기본 적용 포맷 아님 (§20.5).
+- **run 인자 해석 확장**: preflight는 `--project`만으로 run을 만드는데 postflight/show는 같은 run을 run ID나 `latest`로 못 찾고 전체 절대경로를 강제했다. `resolve_run`에 `project_path`/`runs_dir` 옵션을 더해, 인자가 직접 가리키는 경로가 아니면 `<project>/.haco/runs/<arg>`에서 재해석한다(기존 절대경로 직접 해석은 `_resolve_existing`으로 보존). `cmd_postflight`는 project_path를 resolve 앞으로 옮겨 넘기고, `cmd_show`엔 `--project`를 추가. 정본 HACO.md의 CLI 예시(절대경로)는 상위호환이라 그대로 유효 → 정본 미수정.
+- **postflight 실패 판정**: `_detect_test_outcome`이 부분문자열(`failed`·`passed` 동시 존재)로 판정해 실제 pytest 실패 요약(`1 failed, 71 passed`)을 unknown으로 떨궜고 failure_fixer가 안 돌았다(1개라도 통과하면 실패 놓침). `N failed`/`N error(s)` 카운트를 정규식으로 우선 신뢰(합 0이면 통과, >0이면 실패)하고, 카운트가 없을 때만 강한 마커로 폴백한다. 오탐 잦은 단독 `error`/`fail` 토큰은 폴백에서 제외.
 
 ## 라이브 검증 결과
 - 실제 `.env` 키로 google provider 검증 완료. 모델 `gemma-4-31b-it` 실재 확인(계약서 예시 모델명 정확). 단일 task_router 호출이 스키마에 맞는 JSON 반환.
