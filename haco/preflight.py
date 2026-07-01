@@ -16,6 +16,7 @@ from haco.confidence import evaluate_confidence
 from haco.context_pack import build_context_pack
 from haco.metrics import build_metrics
 from haco.model_client import ModelProvider, get_provider
+from haco.ranking import post_locator_rerank
 from haco.run_store import create_run
 from haco.scanner import scan_project
 from haco.schemas import TaskPacket
@@ -162,6 +163,14 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
                 "First pass had low confidence; retried with search_keywords "
                 "against repo_map and file_paths_sample.")
 
+    # ---- Stage 1.6: deterministic post-locator rerank ----
+    # LLM locator 는 제안자. 여기서 결정론 content-aware 랭커가 최종 파일 순서를 확정한다.
+    # rescan 이후(최종 locator)에 반드시 적용해 context_pack 이 올바른 파일을 excerpt 하게 한다.
+    locator = post_locator_rerank(locator, snapshot, config)
+    outputs["file_locator"] = locator  # aggregate/context_pack 이 이 보정본을 쓰게 반영
+    locator_adjusted = bool(locator.get("locator_adjusted"))
+    locator_adjust_reason = locator.get("locator_adjust_reason", "")
+
     # ---- skip 판단 ----
     skip = False
     skip_reason = ""
@@ -305,6 +314,7 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
         core_failed=core_failed, skip=skip, skip_reason=skip_reason,
         locator_passes=locator_passes, locator_rescan_applied=rescan_applied,
         locator_rescan_notes=rescan_notes, candidate_summary=candidate_summary,
+        locator_adjusted=locator_adjusted, locator_adjust_reason=locator_adjust_reason,
         suggested_improvement=suggested, prior_change_reference=prior_ref,
         confidence=confidence,
         context_pack_generated=cp_generated,
@@ -335,6 +345,8 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
     metrics["deterministic_signal_count"] = confidence["deterministic_signal_count"]
     metrics["fail_closed_triggered"] = confidence["fail_closed_triggered"]
     metrics["hard_gates_triggered"] = confidence["hard_gates_triggered"]
+    metrics["locator_adjusted"] = locator_adjusted
+    metrics["locator_adjust_reason"] = locator_adjust_reason
     if brief_notes or cp_notes:
         metrics["compression_notes"] = list(metrics["compression_notes"]) + brief_notes + cp_notes
     write_json(run_path / "metrics.json", metrics)

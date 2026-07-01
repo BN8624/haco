@@ -20,6 +20,22 @@ def test_extract_function_and_class():
     assert cls["line_start"] >= 1 and cls["line_end"] >= cls["line_start"]
 
 
+def test_extract_top_level_constants():
+    # §5 2차 보강: top-level 상수/설정 테이블(UPPER_CASE, *_RELIEF/_YEARS 류)을 추출한다.
+    src = ("LINEAGE_STARVATION_RELIEF = 0.25\n"
+           "RELIEF_YEARS: int = 5\n"
+           "helper = compute()\n"
+           "def foo():\n    pass\n")
+    syms = extract_python_symbols(src)
+    consts = [s for s in syms if s["kind"] == "constant"]
+    names = {s["name"] for s in consts}
+    assert "LINEAGE_STARVATION_RELIEF" in names
+    assert "RELIEF_YEARS" in names       # 타입 주석(AnnAssign)도 지원
+    assert "helper" not in names         # 소문자 비상수는 제외
+    c = next(s for s in consts if s["name"] == "LINEAGE_STARVATION_RELIEF")
+    assert c["line_start"] == 1 and c["line_end"] >= 1
+
+
 def test_build_repo_map_status(sample_project):
     files = ["pkg/calc.py", "tests/test_calc.py"]
     repo_map, status, notes = build_repo_map(sample_project, files)

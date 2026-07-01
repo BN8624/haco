@@ -147,6 +147,9 @@ class TaskPacket(BaseModel):
     locator_passes: int = 1
     locator_rescan_applied: bool = False
     locator_rescan_notes: list[str] = Field(default_factory=list)
+    # 결정론 post-locator rerank 가 worker 의 top 파일을 바꿨는지(§10 content offloading).
+    locator_adjusted: bool = False
+    locator_adjust_reason: str = ""
     task_type: TaskType = "unknown"
     user_decision_needed: bool = False
     risk: Risk = "medium"

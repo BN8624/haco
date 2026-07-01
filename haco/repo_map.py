@@ -6,6 +6,31 @@ import re
 from pathlib import Path
 
 DOCSTRING_PREVIEW_CHARS = 120
+CONST_VALUE_PREVIEW_CHARS = 60
+MAX_CONSTANTS_PER_FILE = 30
+
+# 이 접미사로 끝나는 이름은 UPPER_CASE 가 아니어도 설정 상수로 우선 추출한다(튜닝 파라미터 류).
+_CONST_SUFFIXES = ("_RELIEF", "_THRESHOLD", "_YEARS", "_DAYS")
+
+
+def _is_constant_name(name: str) -> bool:
+    """top-level 상수/설정 이름인지. UPPER_CASE 상수 또는 *_RELIEF/_THRESHOLD/_YEARS/_DAYS 류."""
+    if not name or len(name) < 2 or not any(c.isalpha() for c in name):
+        return False
+    if name.isupper():  # LINEAGE_STARVATION_RELIEF, MAX_FILES 류 (숫자/underscore 는 무시됨)
+        return True
+    up = name.upper()
+    return any(up.endswith(s) for s in _CONST_SUFFIXES)
+
+
+def _const_value_preview(node: ast.AST) -> str:
+    value = getattr(node, "value", None)
+    if value is None:
+        return ""
+    try:
+        return ast.unparse(value)[:CONST_VALUE_PREVIEW_CHARS]
+    except Exception:
+        return ""
 
 
 def _docstring_preview(node: ast.AST) -> str:
@@ -44,6 +69,21 @@ def extract_python_symbols(source: str) -> list[dict]:
     tree = ast.parse(source)
     symbols: list[dict] = []
     imports: list[str] = []
+    n_constants = 0
+
+    def _add_constant(name: str, node: ast.AST) -> None:
+        nonlocal n_constants
+        if n_constants >= MAX_CONSTANTS_PER_FILE or not _is_constant_name(name):
+            return
+        preview = _const_value_preview(node)
+        symbols.append({
+            "kind": "constant",
+            "name": name,
+            "signature": f"{name} = {preview}" if preview else name,
+            "line_start": node.lineno,
+            "line_end": getattr(node, "end_lineno", node.lineno) or node.lineno,
+        })
+        n_constants += 1
 
     for node in tree.body:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
@@ -79,6 +119,15 @@ def extract_python_symbols(source: str) -> list[dict]:
                 "methods": methods[:12],
                 "docstring_preview": _docstring_preview(node),
             })
+        elif isinstance(node, ast.Assign):
+            # UPPER_CASE = ... / *_RELIEF = ... 류의 top-level 상수·설정 테이블. 여러 타깃 지원.
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name):
+                    _add_constant(tgt.id, node)
+        elif isinstance(node, ast.AnnAssign):
+            # THRESHOLD: float = 0.5 처럼 타입 주석이 붙은 top-level 상수.
+            if isinstance(node.target, ast.Name):
+                _add_constant(node.target.id, node)
 
     result = symbols
     if imports:

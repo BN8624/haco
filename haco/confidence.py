@@ -37,6 +37,8 @@ def evaluate_confidence(*, snapshot: dict, locator: dict, context_pack_json: dic
     keywords = [k.lower() for k in (locator.get("search_keywords") or []) if k]
     cp_files = context_pack_json.get("files", []) or []
     cp_kinds = [f.get("kind") for f in cp_files]
+    # symbol excerpt 의 match tier. exact_name 은 강한 신호, signature/partial 은 약한 신호.
+    cp_symbol_tiers = [f.get("match_tier") for f in cp_files if f.get("kind") == "symbol"]
     n_ranges = len(cp_files)
     budget = context_pack_json.get("budget", {}) or {}
     max_tokens = config.get("budgets", "max_context_pack_tokens", default=8000)
@@ -53,11 +55,16 @@ def evaluate_confidence(*, snapshot: dict, locator: dict, context_pack_json: dic
     signals: list[str] = []
     if files_to_read and any(f in known for f in files_to_read):
         signals.append("path_evidence")               # 실재하는 파일 경로
-    # symbol evidence: 대상 파일에 실제 symbols가 있고, context_pack이 symbol excerpt를
-    # 만들었거나 task keyword가 symbol name/signature와 매칭될 때만(단순 "파일 존재" 불충분).
+    # symbol evidence(tier 구분): 대상 파일에 실제 symbols가 있을 때만 평가한다.
+    #  - exact_name 매칭이 있으면 strong_symbol_evidence (task가 지목한 심볼을 정확히 잡음).
+    #  - signature/partial 매칭뿐이면 weak_symbol_evidence 로 낮게 취급(무관 심볼 substring 위험).
     has_real_symbols = any(repo_syms.get(f) for f in files_to_read)
-    if has_real_symbols and ("symbol" in cp_kinds or _keyword_hits_symbol()):
-        signals.append("symbol_evidence")
+    if has_real_symbols:
+        if "exact_name" in cp_symbol_tiers:
+            signals.append("strong_symbol_evidence")
+        elif (any(t in ("partial_name", "signature") for t in cp_symbol_tiers)
+              or _keyword_hits_symbol() or "symbol" in cp_kinds):
+            signals.append("weak_symbol_evidence")
     if n_ranges > 0:
         signals.append("range_evidence")              # focused 범위 확보
     # keyword evidence: files_to_read 안에서 실제 keyword window가 만들어졌을 때만
@@ -85,8 +92,10 @@ def evaluate_confidence(*, snapshot: dict, locator: dict, context_pack_json: dic
         score += 30
     if "range_evidence" in signals:
         score += 30
-    if "symbol_evidence" in signals:
-        score += 20
+    if "strong_symbol_evidence" in signals:
+        score += 25          # exact_name 매칭: 강한 가점
+    elif "weak_symbol_evidence" in signals:
+        score += 10          # signature/partial 만: 약한 가점
     if 0 < n_files <= MAX_FILES_HIGH:
         score += 20
     score = min(100, score)

@@ -151,6 +151,26 @@ def test_keyword_evidence_when_window_present(config):
     assert "keyword_evidence" in d["signals"]
 
 
+def test_exact_symbol_evidence_stronger_than_signature(config):
+    # exact_name 매칭은 strong_symbol_evidence(가점 25), signature-only 는 weak(가점 10).
+    snap = {"file_paths_sample": ["a.py"],
+            "repo_map": [{"file": "a.py", "symbols": [
+                {"kind": "function", "name": "target_fn",
+                 "line_start": 1, "line_end": 3}]}]}
+    loc = {"files_to_read": ["a.py"], "search_keywords": ["target_fn"]}
+    cp_exact = {"files": [{"kind": "symbol", "match_tier": "exact_name"}],
+                "budget": {"token_estimate": 50, "max_tokens": 8000}}
+    cp_sig = {"files": [{"kind": "symbol", "match_tier": "signature"}],
+              "budget": {"token_estimate": 50, "max_tokens": 8000}}
+    d_exact = evaluate_confidence(snapshot=snap, locator=loc, context_pack_json=cp_exact,
+                                  task_type="code_change", config=config)
+    d_sig = evaluate_confidence(snapshot=snap, locator=loc, context_pack_json=cp_sig,
+                                task_type="code_change", config=config)
+    assert "strong_symbol_evidence" in d_exact["signals"]
+    assert "weak_symbol_evidence" in d_sig["signals"]
+    assert d_exact["evidence_score"] > d_sig["evidence_score"]
+
+
 def test_fullblock_missing_symbol_not_accepted(tmp_path):
     # full_block target symbol이 repo_map에 없으면 high confidence여도 masked.
     run = create_run(tmp_path)

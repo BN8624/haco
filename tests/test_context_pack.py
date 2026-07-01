@@ -69,6 +69,23 @@ def test_context_pack_uses_snapshot_search_hints(sample_project, config):
     assert any("matched the task" in f["reason"] for f in js["files"])
 
 
+def test_adaptive_symbols_for_many_exact_matches(sample_project, config):
+    # exact_name 매칭 심볼이 5개면 기본 상한 3을 넘어 excerpt 를 허용한다(상수 테이블 변경 등).
+    (sample_project / "consts.py").write_text(
+        "AAA = 1\nBBB = 2\nCCC = 3\nDDD = 4\nEEE = 5\nFFF = 6\n", encoding="utf-8")
+    symbols = [{"kind": "constant", "name": n, "signature": f"{n} = ",
+                "line_start": i + 1, "line_end": i + 1}
+               for i, n in enumerate(["AAA", "BBB", "CCC", "DDD", "EEE", "FFF"])]
+    snapshot = {"repo_map": [{"file": "consts.py", "symbols": symbols}]}
+    packet = TaskPacket(files_to_read=["consts.py"],
+                        search_keywords=["aaa", "bbb", "ccc", "ddd", "eee"])
+    md, js = build_context_pack(project_path=sample_project, snapshot=snapshot,
+                                packet=packet, config=config)
+    entries = [f for f in js["files"] if f["file"] == "consts.py"]
+    assert len(entries) > 3  # 기본 상한 3 초과 허용
+    assert all(f.get("match_tier") == "exact_name" for f in entries[:5])
+
+
 def test_build_context_pack_fail_closed_on_skip(sample_project, config):
     packet = TaskPacket(haco_status="skip_to_main_agent",
                         files_to_read=["pkg/calc.py"])

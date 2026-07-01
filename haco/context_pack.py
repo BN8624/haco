@@ -11,8 +11,12 @@ from haco.utils import estimate_tokens
 MAX_FILES = 5              # MAX_FILES_MEDIUM
 MAX_RANGE_LINES = 200      # MAX_RANGE_LINES_HIGH
 KEYWORD_WINDOW = 40        # 키워드 앞뒤로 읽을 라인 수
-MAX_SYMBOLS_PER_FILE = 3   # 파일당 excerpt로 뽑을 심볼 상한
+MAX_SYMBOLS_PER_FILE = 3   # 파일당 excerpt로 뽑을 심볼 상한(기본)
+MAX_SYMBOLS_ADAPTIVE = 6   # 정확매칭 심볼이 많으면 이 상한까지 확장(상수 테이블 변경 등)
 DEFAULT_MAX_TOKENS = 8000  # MAX_CONTEXT_PACK_TOKENS
+
+# _symbol_match_score → context_pack/confidence 가 공유하는 match tier 라벨.
+_MATCH_TIER = {3: "exact_name", 2: "partial_name", 1: "signature", 0: "none"}
 
 _CODE_SUFFIXES = (".py", ".js", ".jsx", ".ts", ".tsx", ".rs", ".go")
 _DOC_SUFFIXES = (".md", ".rst")
@@ -99,8 +103,12 @@ def _symbol_entries(rel: str, lines: list[str], symbols: list[dict],
         enumerate(ranged),
         key=lambda iv: (-_symbol_match_score(iv[1], keywords), iv[0]),
     )
+    # adaptive 상한: 정확매칭(exact_name) 심볼이 많으면(상수 테이블 일괄 변경 등) 3개로 잘리면
+    # 타깃 심볼을 놓친다. exact 개수만큼 최대 6까지 열어 준다. 초과 excerpt 는 상위 token budget 이 막는다.
+    n_exact = sum(1 for _, s in scored if _symbol_match_score(s, keywords) == 3)
+    cap = min(MAX_SYMBOLS_ADAPTIVE, max(MAX_SYMBOLS_PER_FILE, n_exact))
     entries: list[dict] = []
-    for idx, s in scored[:MAX_SYMBOLS_PER_FILE]:
+    for idx, s in scored[:cap]:
         score = _symbol_match_score(s, keywords)
         ls = int(s["line_start"])
         le = int(s.get("line_end") or ls)
@@ -108,6 +116,7 @@ def _symbol_entries(rel: str, lines: list[str], symbols: list[dict],
         entries.append({
             "file": rel, "kind": "symbol", "symbol": s.get("name", ""),
             "signature": s.get("signature", ""),
+            "match_tier": _MATCH_TIER[score],
             "line_start": ls, "line_end": le, "excerpt": body,
             "reason": f"{s.get('kind', 'symbol')} `{s.get('name', '')}` "
                       + ("matched the task" if score > 0 else "in target file"),
