@@ -86,7 +86,10 @@ def test_hard_filter_rejects_and_moves(tmp_path):
     good = write_patch_candidate(run, {
         "candidate_id": "candidate_01", "_target_files": ["pkg/calc.py"],
         "_language": "python", "preferred_apply_method": "search_replace",
-        "summary": "g", "risk": "low", "reason": "x"})
+        "summary": "g", "risk": "low", "reason": "x",
+        # 실제 anchor가 있어야 accepted 가능(placeholder skeleton은 masked).
+        "search_replace_edits": [{"file": "pkg/calc.py", "operation": "replace",
+                                  "search": "return a", "replace": "return a + b"}]})
     bad = write_patch_candidate(run, {
         "candidate_id": "candidate_02", "_target_files": [],
         "_language": "python", "preferred_apply_method": "full_block",
@@ -123,7 +126,10 @@ def test_summary_counts(tmp_path):
                                     "_target_files": ["pkg/calc.py"],
                                     "_language": "python",
                                     "preferred_apply_method": "search_replace",
-                                    "summary": "s", "risk": "low", "reason": "x"})
+                                    "summary": "s", "risk": "low", "reason": "x",
+                                    "search_replace_edits": [
+                                        {"file": "pkg/calc.py", "operation": "replace",
+                                         "search": "return a", "replace": "return a+b"}]})
     t = write_test_candidate(run, {"_language": "python", "test_scope": "focused",
                                    "tests_to_run": ["pytest"], "reason": "x"},
                              "candidate_test_01")

@@ -17,6 +17,11 @@ def _parse_bool(val: str) -> bool:
     return val.strip().lower() in ("yes", "true", "y", "1")
 
 
+def _parse_int(val: str | None) -> int:
+    m = re.search(r"-?\d+", val or "")
+    return int(m.group()) if m else 0
+
+
 def parse_haco_validation(execution_result: str) -> tuple[HacoValidation | None, bool]:
     """execution_result.md에서 HACO Validation 섹션을 파싱한다.
 
@@ -38,13 +43,28 @@ def parse_haco_validation(execution_result: str) -> tuple[HacoValidation | None,
     if usefulness not in ("usable", "partially_usable", "unusable", "none"):
         usefulness = "none"
 
+    tier = (field("confidence_tier") or "none").split()[0]
+    if tier not in ("high", "medium", "low", "none"):
+        tier = "none"
+    cp_read = (field("context_pack_read") or "not_present").split()[0]
+    if cp_read not in ("yes", "no", "not_present"):
+        cp_read = "not_present"
+
     v = HacoValidation(
+        haco_used=_parse_bool(field("haco_used") or "no"),
         task_packet_read=_parse_bool(field("task_packet_read") or "no"),
+        execution_brief_read=_parse_bool(field("execution_brief_read") or "no"),
+        context_pack_read=cp_read,
         accepted_candidates_checked=_parse_bool(
             field("accepted_candidates_checked") or "no"),
         candidate_usefulness=usefulness,
         bounded_exploration_needed=_parse_bool(
             field("bounded_exploration_needed") or "no"),
+        fail_closed_triggered=_parse_bool(field("fail_closed_triggered") or "no"),
+        fail_closed_reason=field("fail_closed_reason") or "",
+        confidence_tier=tier,
+        evidence_score=_parse_int(field("evidence_score")),
+        deterministic_signal_count=_parse_int(field("deterministic_signal_count")),
         reason=field("reason") or "",
     )
     return v, False
@@ -155,6 +175,11 @@ def run_postflight(*, run_path: Path, project_path: Path | None,
             notes="" if validation else "No HACO Validation section found.",
         ),
         main_agent_did_not_record_haco_validation=missing,
+        fail_closed_triggered=bool(packet.get("fail_closed_triggered", False)),
+        fail_closed_reason=packet.get("fail_closed_reason", ""),
+        confidence_tier=packet.get("confidence_tier", "none"),
+        evidence_score=int(packet.get("evidence_score", 0) or 0),
+        deterministic_signal_count=int(packet.get("deterministic_signal_count", 0) or 0),
         tests_ran=tests_ran,
         tests_passed=tests_passed,
         fix_candidates=fix_candidates,
@@ -179,6 +204,9 @@ def run_postflight(*, run_path: Path, project_path: Path | None,
         f"- Task type: {pf.task_type}",
         f"- Changed: {diff_summary.strip()[:200] or '(see diff_summary.md)'}",
         f"- Tests: {tests_str}",
+        f"- Confidence: {pf.confidence_tier} (evidence={pf.evidence_score}, "
+        f"signals={pf.deterministic_signal_count}, "
+        f"fail_closed={str(pf.fail_closed_triggered).lower()})",
         f"- Result: {'fix candidate generated' if fix_candidates else 'completed'}",
         f"- Risk: {packet.get('risk', 'unknown')}",
         f"- Candidate usefulness: {v.candidate_usefulness}",

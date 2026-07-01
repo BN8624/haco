@@ -9,7 +9,18 @@ from haco.schemas import CandidateMetadata, TaskPacket
 _VALIDATION_TEMPLATE = """```text
 ## HACO Validation
 
+haco_used: yes/no
+haco_skip_reason: none/trivial/no_repo_file_work/uploaded_file_review/unavailable/not_cost_effective/other
+haco_skip_approved_by_user: yes/no/not_applicable
+haco_status: completed/skip_to_main_agent/failed
+fail_closed_triggered: yes/no
+fail_closed_reason:
+confidence_tier: high/medium/low/none
+evidence_score:
+deterministic_signal_count:
 task_packet_read: yes/no
+execution_brief_read: yes/no
+context_pack_read: yes/no/not_present
 accepted_candidates_checked: yes/no
 candidate_usefulness: usable | partially_usable | unusable | none
 bounded_exploration_needed: yes/no
@@ -42,6 +53,17 @@ def build_execution_brief(packet: TaskPacket, metas: list[CandidateMetadata],
     lines.append("")
     lines.append("HACO has prepared a task packet and candidate files to reduce your "
                  "exploration cost.")
+    lines.append("")
+
+    # HACO가 결정론 신호로 산출한 confidence(§17.1). LLM self-report이 아니다.
+    lines.append("## HACO confidence (computed by HACO, not self-reported)")
+    lines.append("")
+    lines.append(f"- confidence_tier: {packet.confidence_tier}")
+    lines.append(f"- evidence_score: {packet.evidence_score}")
+    lines.append(f"- deterministic_signal_count: {packet.deterministic_signal_count}")
+    lines.append(f"- fail_closed_triggered: {str(packet.fail_closed_triggered).lower()}")
+    if packet.hard_gates_triggered:
+        lines.append(f"- hard_gates_triggered: {', '.join(packet.hard_gates_triggered)}")
     lines.append("")
 
     if skip:

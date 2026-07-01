@@ -103,7 +103,7 @@ Read only:
 
 ```text
 HACO_CANON.md §1 One-Line Definition
-HACO_CANON.md <one section whose title best matches the task>
+HACO_CANON.md — the one section whose title best matches the task
 ```
 
 Then report:

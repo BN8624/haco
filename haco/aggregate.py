@@ -31,7 +31,10 @@ def build_task_packet(*, run_id: str, project_path: str, outputs: dict[str, dict
                       locator_rescan_notes: list[str],
                       candidate_summary: CandidateSummary | None,
                       suggested_improvement: str = "",
-                      prior_change_reference: str = "") -> TaskPacket:
+                      prior_change_reference: str = "",
+                      confidence: dict | None = None,
+                      context_pack_generated: bool = False,
+                      context_pack_tokens_estimate: int = 0) -> TaskPacket:
     router = outputs.get("task_router", {})
     compressor = outputs.get("context_compressor", {})
     locator = outputs.get("file_locator", {})
@@ -44,6 +47,7 @@ def build_task_packet(*, run_id: str, project_path: str, outputs: dict[str, dict
     test_scope = tester.get("test_scope", "unknown")
     long_run = test_scope == "long_run"
 
+    conf = confidence or {}
     haco_status = "skip_to_main_agent" if skip else "ready"
     if skip:
         recommended_action = ("Main coding agent should proceed directly with normal "
@@ -77,6 +81,14 @@ def build_task_packet(*, run_id: str, project_path: str, outputs: dict[str, dict
         long_run_needed=long_run,
         docs_to_update=doc.get("docs_to_update", []) or [],
         new_doc_needed=bool(doc.get("new_doc_needed", False)),
+        fail_closed_triggered=bool(conf.get("fail_closed_triggered", False)),
+        fail_closed_reason=conf.get("fail_closed_reason", ""),
+        confidence_tier=conf.get("confidence_tier", "none"),
+        evidence_score=int(conf.get("evidence_score", 0)),
+        deterministic_signal_count=int(conf.get("deterministic_signal_count", 0)),
+        hard_gates_triggered=conf.get("hard_gates_triggered", []) or [],
+        context_pack_generated=context_pack_generated,
+        context_pack_tokens_estimate=context_pack_tokens_estimate,
         candidate_summary=candidate_summary or CandidateSummary(),
         prior_change_reference=prior_change_reference,
         constraints=compressor.get("known_constraints", []) or [],

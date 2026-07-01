@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from haco.schemas import CandidateMetadata, CandidateSummary
-from haco.utils import write_json, write_text
+from haco.utils import read_json, read_text, write_json, write_text
 
 
 def _candidates_dir(run_path: Path) -> Path:
@@ -188,9 +188,50 @@ def write_fix_candidate(run_path: Path, output: dict) -> CandidateMetadata:
 
 # ----------------------------- Hard filtering -----------------------------
 
+def _anchor_blocks_accept(run_path: Path, cid: str,
+                          project_path: Path | None) -> str | None:
+    """search_replace anchor 검증. accepted 불가 사유가 있으면 문자열, 없으면 None.
+
+    §17.1 Fail Closed: placeholder/빈 replace/anchor 0회·다회 매칭은 accepted가 될 수 없다.
+    project_path가 있고 target 파일이 실재할 때만 실제 매칭 횟수를 확인한다(없으면 placeholder만 검사).
+    """
+    sr = read_json(Path(run_path) / "candidates" / cid / "search_replace.json",
+                   default=None)
+    if not sr or not sr.get("edits"):
+        return None  # search_replace 후보가 아니면 이 규칙 대상 아님
+    for e in sr["edits"]:
+        search = e.get("search", "")
+        replace = e.get("replace", "")
+        op = e.get("operation", "replace")
+        if "<<<" in search or "<<<" in replace:
+            return "search/replace is a placeholder skeleton"
+        if not search.strip():
+            return "empty search anchor"
+        if op == "replace" and not replace.strip():
+            return "empty replacement for a replace operation"
+        if project_path is not None:
+            target = Path(project_path) / e.get("file", "")
+            if target.is_file():
+                try:
+                    count = read_text(target).count(search)
+                except OSError:
+                    count = -1
+                if count == 0:
+                    return "search anchor matches zero locations"
+                if count > 1:
+                    return f"search anchor matches {count} locations (ambiguous)"
+    return None
+
+
 def apply_hard_filter(run_path: Path, metas: list[CandidateMetadata],
-                      judge: dict, snapshot: dict) -> list[CandidateMetadata]:
-    """judge 결과 + 규칙으로 candidate 상태를 확정하고 candidate.json을 갱신한다."""
+                      judge: dict, snapshot: dict, *,
+                      confidence_tier: str = "high",
+                      project_path: Path | None = None) -> list[CandidateMetadata]:
+    """judge 결과 + 규칙으로 candidate 상태를 확정하고 candidate.json을 갱신한다.
+
+    confidence_tier가 high가 아니면 accepted를 masked로 강등한다(§17.1: medium은 draft_only).
+    anchor 검증에 실패한 후보도 accepted가 될 수 없다.
+    """
     accepted = set(judge.get("accepted_candidates", []) or [])
     masked = set(judge.get("masked_candidates", []) or [])
     rejected = set(judge.get("rejected_candidates", []) or [])
@@ -224,6 +265,19 @@ def apply_hard_filter(run_path: Path, metas: list[CandidateMetadata],
             if status == "accepted":
                 status = "masked"
                 meta.judge_reason = "Target files not found in snapshot/repo_map."
+
+        # anchor 검증: placeholder/빈 replace/0회·다회 매칭이면 accepted 불가(§17.1).
+        if status == "accepted":
+            anchor_reason = _anchor_blocks_accept(run_path, cid, project_path)
+            if anchor_reason:
+                status = "masked"
+                meta.judge_reason = f"Anchor check failed: {anchor_reason}."
+
+        # confidence tier가 high가 아니면 accepted를 draft_only로 강등(§17.1).
+        if status == "accepted" and confidence_tier != "high":
+            status = "masked"
+            meta.judge_reason = (f"Confidence tier is {confidence_tier}; "
+                                 f"candidate kept as draft, not accepted.")
 
         meta.judge_status = status
         meta.expose_in_execution_brief = (status == "accepted")

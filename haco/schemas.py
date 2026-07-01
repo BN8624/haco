@@ -158,6 +158,15 @@ class TaskPacket(BaseModel):
     long_run_needed: bool = False
     docs_to_update: list[str] = Field(default_factory=list)
     new_doc_needed: bool = False
+    # Fail Closed / Confidence Calibration (§17.1). 결정론 evidence 기반 판정 결과.
+    fail_closed_triggered: bool = False
+    fail_closed_reason: str = ""
+    confidence_tier: str = "none"  # high | medium | low | none
+    evidence_score: int = 0
+    deterministic_signal_count: int = 0
+    hard_gates_triggered: list[str] = Field(default_factory=list)
+    context_pack_generated: bool = False
+    context_pack_tokens_estimate: int = 0
     candidate_summary: CandidateSummary = Field(default_factory=CandidateSummary)
     # 직전에 동일 파일을 바꾼 커밋 diff 참조 파일(반복 증분 작업의 템플릿). 없으면 빈 문자열.
     prior_change_reference: str = ""
@@ -170,10 +179,19 @@ class TaskPacket(BaseModel):
 
 class HacoValidation(BaseModel):
     model_config = {"extra": "allow"}
+    haco_used: bool = False
     task_packet_read: bool = False
+    execution_brief_read: bool = False
+    context_pack_read: str = "not_present"  # yes | no | not_present
     accepted_candidates_checked: bool = False
     candidate_usefulness: str = "none"  # usable | partially_usable | unusable | none
     bounded_exploration_needed: bool = False
+    # Fail Closed / Confidence Calibration 지표(§17.1, §24). agent가 기록, postflight가 파싱.
+    fail_closed_triggered: bool = False
+    fail_closed_reason: str = ""
+    confidence_tier: str = "none"  # high | medium | low | none
+    evidence_score: int = 0
+    deterministic_signal_count: int = 0
     reason: str = ""
 
 
@@ -195,6 +213,12 @@ class PostflightPacket(BaseModel):
     haco_validation: HacoValidation = Field(default_factory=HacoValidation)
     haco_effectiveness: HacoEffectiveness = Field(default_factory=HacoEffectiveness)
     main_agent_did_not_record_haco_validation: bool = False
+    # preflight가 판정한 confidence를 postflight로 전달(§24 시스템 metric).
+    fail_closed_triggered: bool = False
+    fail_closed_reason: str = ""
+    confidence_tier: str = "none"
+    evidence_score: int = 0
+    deterministic_signal_count: int = 0
     tests_ran: bool = False
     tests_passed: bool | None = None
     fix_candidates: list[str] = Field(default_factory=list)

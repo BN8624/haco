@@ -12,6 +12,7 @@ from haco.budget import trim_snapshot, trim_text
 from haco.candidate_store import (apply_hard_filter, build_candidate_summary,
                                   write_patch_candidate, write_test_candidate)
 from haco.config import Config
+from haco.confidence import evaluate_confidence
 from haco.context_pack import build_context_pack
 from haco.metrics import build_metrics
 from haco.model_client import ModelProvider, get_provider
@@ -175,6 +176,25 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
         skip, skip_reason = True, "locator_failed"
         suggested = "Improve repo_map or search_hints for this project type."
 
+    # ---- context pack + fail-closed 판정 (§9, §17.1; 후보 생성 前) ----
+    # LLM이 보고한 locator confidence가 아니라 결정론 신호로 tier를 정한다.
+    prelim = TaskPacket(
+        files_to_read=locator.get("files_to_read", []) or [],
+        files_to_edit=locator.get("files_to_edit", []) or [],
+        search_keywords=locator.get("search_keywords", []) or [],
+        haco_status="skip_to_main_agent" if skip else "ready")
+    _prelim_md, prelim_cp_json = build_context_pack(
+        project_path=project_path, snapshot=snapshot, packet=prelim, config=config)
+    confidence = evaluate_confidence(
+        snapshot=snapshot, locator=locator, context_pack_json=prelim_cp_json,
+        task_type=task_type, config=config)
+    if confidence["fail_closed_triggered"] and not skip:
+        skip = True
+        skip_reason = confidence["fail_closed_reason"] or "low_confidence"
+        suggested = ("Fail-closed: deterministic confidence too low "
+                     f"({', '.join(confidence['hard_gates_triggered']) or 'low_score'}); "
+                     "main agent should use bounded exploration.")
+
     # ---- Stage 2: non-core 후보 생성 (concurrency 적용) ----
     # core worker(위)는 순차 유지. 여기서만 asyncio로 병렬화한다.
     metas = []
@@ -247,7 +267,9 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
         judge = {"accepted_candidates": [m.candidate_id for m in metas],
                  "best_candidate": metas[0].candidate_id if metas else ""}
 
-    metas = apply_hard_filter(run_path, metas, judge, snapshot)
+    metas = apply_hard_filter(run_path, metas, judge, snapshot,
+                              confidence_tier=confidence["confidence_tier"],
+                              project_path=project_path)
     candidate_summary = build_candidate_summary(metas, judge)
 
     # ---- prior change reference (git 기반, 반복 증분 템플릿) ----
@@ -265,10 +287,15 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
         locator_passes=locator_passes, locator_rescan_applied=rescan_applied,
         locator_rescan_notes=rescan_notes, candidate_summary=candidate_summary,
         suggested_improvement=suggested, prior_change_reference=prior_ref,
+        confidence=confidence,
+        context_pack_generated=bool(prelim_cp_json.get("files")),
+        context_pack_tokens_estimate=prelim_cp_json.get("budget", {}).get(
+            "token_estimate", 0),
     )
     write_json(run_path / "task_packet.json", packet.model_dump())
 
     # ---- context_pack (결정론적 focused excerpt; §9 최우선 산출물) ----
+    # 최종 packet 기준으로 다시 만든다: skip이면 haco_status가 반영돼 짧은 pack(§17.1 fail closed).
     cp_md, cp_json = build_context_pack(
         project_path=project_path, snapshot=snapshot, packet=packet, config=config)
     max_cp_tokens = config.get("budgets", "max_context_pack_tokens", default=8000)
@@ -292,6 +319,11 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
     metrics["context_pack_chars"] = len(cp_md)
     metrics["context_pack_tokens_estimate"] = estimate_tokens(cp_md)
     metrics["context_pack_files"] = len(cp_json.get("files", []))
+    metrics["confidence_tier"] = confidence["confidence_tier"]
+    metrics["evidence_score"] = confidence["evidence_score"]
+    metrics["deterministic_signal_count"] = confidence["deterministic_signal_count"]
+    metrics["fail_closed_triggered"] = confidence["fail_closed_triggered"]
+    metrics["hard_gates_triggered"] = confidence["hard_gates_triggered"]
     if brief_notes or cp_notes:
         metrics["compression_notes"] = list(metrics["compression_notes"]) + brief_notes + cp_notes
     write_json(run_path / "metrics.json", metrics)
