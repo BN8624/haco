@@ -12,6 +12,7 @@ from haco.budget import trim_snapshot, trim_text
 from haco.candidate_store import (apply_hard_filter, build_candidate_summary,
                                   write_patch_candidate, write_test_candidate)
 from haco.config import Config
+from haco.context_pack import build_context_pack
 from haco.metrics import build_metrics
 from haco.model_client import ModelProvider, get_provider
 from haco.run_store import create_run
@@ -19,7 +20,7 @@ from haco.scanner import scan_project
 from haco.schemas import TaskPacket
 from haco.workers import (CORE_WORKERS, compact_snapshot, focused_rescan,
                           run_worker, run_worker_async)
-from haco.utils import write_json, write_text
+from haco.utils import estimate_tokens, write_json, write_text
 
 
 def _locator_needs_rescan(locator: dict, task_type: str) -> bool:
@@ -267,6 +268,14 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
     )
     write_json(run_path / "task_packet.json", packet.model_dump())
 
+    # ---- context_pack (결정론적 focused excerpt; §9 최우선 산출물) ----
+    cp_md, cp_json = build_context_pack(
+        project_path=project_path, snapshot=snapshot, packet=packet, config=config)
+    max_cp_tokens = config.get("budgets", "max_context_pack_tokens", default=8000)
+    cp_md, cp_notes = trim_text(cp_md, max_cp_tokens * 4, "context_pack")
+    write_text(run_path / "context_pack.md", cp_md)
+    write_json(run_path / "context_pack.json", cp_json)
+
     # ---- execution_brief ----
     brief = build_execution_brief(packet, metas, run_path)
     max_brief = config.get("budgets", "max_execution_brief_chars", default=16000)
@@ -280,13 +289,17 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
         execution_brief=brief, run_path=run_path, provider=provider.name,
         worker_timings=timings, wall_time=wall,
     )
-    if brief_notes:
-        metrics["compression_notes"] = list(metrics["compression_notes"]) + brief_notes
+    metrics["context_pack_chars"] = len(cp_md)
+    metrics["context_pack_tokens_estimate"] = estimate_tokens(cp_md)
+    metrics["context_pack_files"] = len(cp_json.get("files", []))
+    if brief_notes or cp_notes:
+        metrics["compression_notes"] = list(metrics["compression_notes"]) + brief_notes + cp_notes
     write_json(run_path / "metrics.json", metrics)
 
     return {
         "run_path": str(run_path),
         "task_packet": str(run_path / "task_packet.json"),
+        "context_pack": str(run_path / "context_pack.md"),
         "execution_brief": str(run_path / "execution_brief.md"),
         "candidates": str(run_path / "candidates"),
         "metrics": str(run_path / "metrics.json"),

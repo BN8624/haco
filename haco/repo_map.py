@@ -63,6 +63,8 @@ def extract_python_symbols(source: str) -> list[dict]:
                 "kind": "function",
                 "name": node.name,
                 "signature": f"{node.name}({_format_args(node)}){ret}",
+                "line_start": node.lineno,
+                "line_end": getattr(node, "end_lineno", node.lineno) or node.lineno,
                 "docstring_preview": _docstring_preview(node),
             })
         elif isinstance(node, ast.ClassDef):
@@ -72,6 +74,8 @@ def extract_python_symbols(source: str) -> list[dict]:
                 "kind": "class",
                 "name": node.name,
                 "signature": f"class {node.name}",
+                "line_start": node.lineno,
+                "line_end": getattr(node, "end_lineno", node.lineno) or node.lineno,
                 "methods": methods[:12],
                 "docstring_preview": _docstring_preview(node),
             })
@@ -98,15 +102,20 @@ _REGEX_HINTS = {
 
 
 def extract_regex_symbols(source: str, suffix: str) -> list[dict]:
-    """Python 외 언어에 대한 best-effort 정규식 symbol hint."""
+    """Python 외 언어에 대한 best-effort 정규식 symbol hint.
+
+    AST가 없어 정확한 끝 라인은 알 수 없으므로 매치 시작 라인만 line_start로 준다.
+    """
     patterns = _REGEX_HINTS.get(suffix, [])
-    names: list[str] = []
+    first_line: dict[str, int] = {}
     for pat in patterns:
         for m in re.finditer(pat, source):
-            names.append(m.group(1))
+            name = m.group(1)
+            if name not in first_line:  # 순서 보존 + 최초 등장 라인
+                first_line[name] = source.count("\n", 0, m.start()) + 1
     seen: list[dict] = []
-    for n in dict.fromkeys(names):  # 순서 보존 dedup
-        seen.append({"kind": "symbol_hint", "name": n})
+    for n, line in first_line.items():
+        seen.append({"kind": "symbol_hint", "name": n, "line_start": line})
     return seen[:40]
 
 

@@ -13,8 +13,11 @@ def test_extract_function_and_class():
                for s in syms)
     fn = next(s for s in syms if s.get("name") == "run")
     assert "Run one task" in fn["docstring_preview"]
+    # §11: 심볼은 line 범위를 가져야 한다(context_pack excerpt의 전제).
+    assert fn["line_start"] >= 1 and fn["line_end"] >= fn["line_start"]
     cls = next(s for s in syms if s.get("name") == "Worker")
     assert "go" in cls["methods"]
+    assert cls["line_start"] >= 1 and cls["line_end"] >= cls["line_start"]
 
 
 def test_build_repo_map_status(sample_project):

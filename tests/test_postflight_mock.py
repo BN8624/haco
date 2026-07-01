@@ -44,6 +44,8 @@ def test_postflight_outputs(sample_project, config):
                         config=config, provider=MockProvider())
     assert (Path(run) / "report.md").exists()
     assert (Path(run) / "postflight_packet.json").exists()
+    assert (Path(run) / "auto_diff_summary.md").exists()  # §7.3 산출물
+    assert pf["auto_diff_summary"].endswith("auto_diff_summary.md")
     packet = read_json(Path(run) / "postflight_packet.json")
     assert packet["haco_validation"]["task_packet_read"] is True
     assert packet["main_agent_did_not_record_haco_validation"] is False

@@ -74,6 +74,7 @@ def cmd_preflight(args) -> int:
                            config=config, provider=provider)
     print(f"haco preflight done (status={result['haco_status']})")
     print(f"  run:             {result['run_path']}")
+    print(f"  context_pack:    {result['context_pack']}")
     print(f"  task_packet:     {result['task_packet']}")
     print(f"  execution_brief: {result['execution_brief']}")
     print(f"  candidates:      {result['candidates']}")
@@ -90,11 +91,12 @@ def cmd_run(args) -> int:
     result = run_preflight(project_path=project_path, task=task, profile=profile,
                            config=config, provider=provider)
     print("haco run complete.")
+    print(f"  context_pack:    {result['context_pack']}")
     print(f"  task_packet:     {result['task_packet']}")
     print(f"  execution_brief: {result['execution_brief']}")
     print(f"  candidates:      {result['candidates']}")
     print()
-    print("Main coding agent: read execution_brief.md and proceed.")
+    print("Main coding agent: read context_pack.md then execution_brief.md and proceed.")
     return 0
 
 
@@ -112,6 +114,7 @@ def cmd_postflight(args) -> int:
     print("haco postflight done.")
     print(f"  report:            {result['report']}")
     print(f"  postflight_packet: {result['postflight_packet']}")
+    print(f"  auto_diff_summary: {result['auto_diff_summary']}")
     if result["missing_validation"]:
         print("  warning: no HACO Validation section found in execution_result.md")
     if result["fix_candidates"]:
@@ -166,8 +169,15 @@ def cmd_show(args) -> int:
 def cmd_bootstrap(args) -> int:
     from haco.bootstrap import run_bootstrap
     project_path, config = _common_config(args)
-    contract = Path(args.contract) if getattr(args, "contract", None) else \
-        (project_path / "HACO.md")
+    if getattr(args, "contract", None):
+        contract = Path(args.contract)
+    else:
+        # 정본은 HACO_CANON.md. 구 계약서(HACO.md)는 archive/로 이관됨.
+        contract = next(
+            (p for p in (project_path / "HACO_CANON.md",
+                         project_path / "archive" / "HACO.md",
+                         project_path / "HACO.md") if p.exists()),
+            project_path / "HACO_CANON.md")
     provider = get_provider(config)
     result = run_bootstrap(contract_path=contract, config=config, provider=provider)
     print(f"bootstrap done: {result['workers']} workers")

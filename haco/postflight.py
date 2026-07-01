@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 from haco.candidate_store import write_fix_candidate
@@ -79,6 +80,42 @@ def _detect_test_outcome(run_path: Path) -> tuple[bool, bool | None]:
     return False, None
 
 
+def build_auto_diff_summary(project_path: Path | None) -> str:
+    """git으로 작업트리 변경을 결정론적으로 요약한다(§7.3 auto_diff_summary).
+
+    에이전트가 쓴 diff_summary.md와 별개로 HACO가 직접 만드는 확정 요약이다.
+    git이 없거나 커밋 후라 변경이 없으면 정직하게 그 사실을 적는다.
+    """
+    if not project_path:
+        return "# Auto diff summary\n\n(no project path; cannot compute git diff)\n"
+
+    def _git(*args: str) -> tuple[int, str]:
+        try:
+            p = subprocess.run(["git", "-C", str(project_path), *args],
+                               capture_output=True, text=True, encoding="utf-8",
+                               errors="replace", timeout=15)
+            return p.returncode, p.stdout
+        except Exception:
+            return 1, ""
+
+    rc, stat = _git("diff", "--stat", "HEAD")
+    if rc != 0:
+        return "# Auto diff summary\n\n(not a git repository or git unavailable)\n"
+    _, status = _git("status", "--porcelain")
+    untracked = [ln for ln in status.splitlines() if ln.startswith("??")]
+
+    body = ["# Auto diff summary", "",
+            "Deterministic git working-tree summary produced by HACO.", ""]
+    if stat.strip():
+        body += ["```", stat.strip(), "```", ""]
+    else:
+        body += ["- No uncommitted changes vs HEAD "
+                 "(the agent may have already committed; see diff_summary.md).", ""]
+    if untracked:
+        body.append(f"- Untracked files: {len(untracked)}")
+    return "\n".join(body) + "\n"
+
+
 def run_postflight(*, run_path: Path, project_path: Path | None,
                    config: Config, provider: ModelProvider | None = None) -> dict:
     run_path = Path(run_path)
@@ -124,6 +161,10 @@ def run_postflight(*, run_path: Path, project_path: Path | None,
     )
     write_json(run_path / "postflight_packet.json", pf.model_dump())
 
+    # auto_diff_summary.md — HACO가 직접 만드는 결정론적 diff 요약(§7.3)
+    auto_diff = build_auto_diff_summary(project_path)
+    write_text(run_path / "auto_diff_summary.md", auto_diff)
+
     # report.md
     v = pf.haco_validation
     if not tests_ran:
@@ -153,6 +194,7 @@ def run_postflight(*, run_path: Path, project_path: Path | None,
         "run_path": str(run_path),
         "report": str(run_path / "report.md"),
         "postflight_packet": str(run_path / "postflight_packet.json"),
+        "auto_diff_summary": str(run_path / "auto_diff_summary.md"),
         "missing_validation": missing,
         "fix_candidates": fix_candidates,
     }

@@ -73,8 +73,10 @@ def build_execution_brief(packet: TaskPacket, metas: list[CandidateMetadata],
 
     lines.append("## Required behavior")
     lines.append("")
-    lines.append("- Read `task_packet.json` first.")
-    lines.append("- Read the suggested files first.")
+    lines.append("- Read `context_pack.md` first — focused excerpts with line ranges "
+                 "so you can avoid reading whole files.")
+    lines.append("- Then read `task_packet.json`.")
+    lines.append("- Read the suggested files only where the context pack is insufficient.")
     lines.append("- Check accepted candidates before writing a patch from scratch.")
     if packet.prior_change_reference:
         lines.append(f"- Read `{packet.prior_change_reference}` — the prior similar change "

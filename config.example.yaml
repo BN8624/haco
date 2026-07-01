@@ -80,6 +80,7 @@ budgets:
   max_execution_brief_chars: 16000
   max_task_packet_chars: 12000
   max_candidate_total_chars: 40000
+  max_context_pack_tokens: 8000
   token_estimation: "char_div_4"
 
 scanner:
