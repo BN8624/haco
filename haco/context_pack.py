@@ -67,6 +67,26 @@ def _keyword_window(lines: list[str], keywords: list[str]) -> tuple[int, int] | 
     return None
 
 
+def _symbol_match_score(sym: dict, keywords: list[str]) -> int:
+    """심볼-키워드 매칭 tier. 이름 정확/부분 매칭이 시그니처 substring보다 강하다.
+
+    3=이름 정확매칭, 2=이름 부분매칭, 1=시그니처 substring, 0=매칭 없음.
+    tier 구분이 없으면 task가 지목한 함수명(`compute_starvation_pressure`)이 무관 함수의
+    시그니처 파라미터 매칭(`rng`)에 밀린다.
+    """
+    name = (sym.get("name") or "").lower()
+    kws = [k.lower() for k in keywords if k]
+    if not name:
+        return 1 if any(k in (sym.get("signature") or "").lower() for k in kws) else 0
+    if name in kws:
+        return 3
+    if any(k in name or name in k for k in kws):
+        return 2
+    if any(k in (sym.get("signature") or "").lower() for k in kws):
+        return 1
+    return 0
+
+
 def _symbol_entries(rel: str, lines: list[str], symbols: list[dict],
                     keywords: list[str]) -> list[dict]:
     """repo_map 심볼(line 범위 보유) 기준 excerpt 항목들을 만든다."""
@@ -74,12 +94,14 @@ def _symbol_entries(rel: str, lines: list[str], symbols: list[dict],
               if isinstance(s, dict) and s.get("line_start")]
     if not ranged:
         return []
-    # 키워드와 맞는 심볼을 먼저, 그 다음 등장 순서. 결정론적.
-    matched = [s for s in ranged if _match_keyword(
-        f"{s.get('name', '')} {s.get('signature', '')}", keywords)]
-    ordered = matched + [s for s in ranged if s not in matched]
+    # 매칭 tier 내림차순, 동점은 등장 순서(안정). 결정론적. tier가 강한 이름 매칭을 우선한다.
+    scored = sorted(
+        enumerate(ranged),
+        key=lambda iv: (-_symbol_match_score(iv[1], keywords), iv[0]),
+    )
     entries: list[dict] = []
-    for s in ordered[:MAX_SYMBOLS_PER_FILE]:
+    for idx, s in scored[:MAX_SYMBOLS_PER_FILE]:
+        score = _symbol_match_score(s, keywords)
         ls = int(s["line_start"])
         le = int(s.get("line_end") or ls)
         body, ls, le, trunc = _excerpt(lines, ls, le)
@@ -88,8 +110,7 @@ def _symbol_entries(rel: str, lines: list[str], symbols: list[dict],
             "signature": s.get("signature", ""),
             "line_start": ls, "line_end": le, "excerpt": body,
             "reason": f"{s.get('kind', 'symbol')} `{s.get('name', '')}` "
-                      f"matched the task" if s in matched
-                      else f"{s.get('kind', 'symbol')} `{s.get('name', '')}` in target file",
+                      + ("matched the task" if score > 0 else "in target file"),
             "excerpt_truncated": trunc,
         })
     return entries
@@ -177,7 +198,12 @@ def build_context_pack(*, project_path: Path, snapshot: dict, packet: TaskPacket
     project_path = Path(project_path)
     max_tokens = config.get("budgets", "max_context_pack_tokens",
                             default=DEFAULT_MAX_TOKENS)
-    keywords = list(packet.search_keywords or [])
+    # Intent Expansion: locator가 [:8]로 자른 search_keywords만 쓰면 task가 지목한 함수/상수
+    # 식별자를 놓쳐 symbol excerpt가 엉뚱한 심볼(파일 첫 심볼)로 폴백한다. snapshot의 전체
+    # search_hints(식별자 우선, 미절단)를 병합해 심볼명 매칭이 task intent를 반영하게 한다.
+    keywords = list(dict.fromkeys(
+        list(packet.search_keywords or []) + list(snapshot.get("search_hints") or [])
+    ))
 
     repo_index = {item["file"]: item.get("symbols", [])
                   for item in snapshot.get("repo_map", []) or []

@@ -25,6 +25,23 @@ def test_extract_keywords_preserves_english_and_filters_noise():
     assert "to" not in kws       # 2자 순수 영문 잡음
 
 
+def test_extract_keywords_identifiers_first():
+    # Intent Expansion: 코드 식별자가 일반 산문어보다 앞서야 locator [:8] 절단에서 살아남는다.
+    kws = _extract_keywords(
+        "refactor the loader helper compute_starvation_pressure update_population")
+    assert "compute_starvation_pressure" in kws
+    assert "update_population" in kws
+    assert kws.index("compute_starvation_pressure") < kws.index("loader")
+    assert kws.index("update_population") < kws.index("helper")
+
+
+def test_keyword_matches_filename_stem_boost():
+    # task가 명시한 파일 stem 정확매칭이 같은 접두 substring보다 확실히 앞선다(phase5 vs phase3).
+    files = ["verify_phase3a.py", "verify_phase3b.py", "verify_phase5a.py"]
+    out = _keyword_matches(["verify_phase5a", "phase"], files)
+    assert out[0] == "verify_phase5a.py"
+
+
 def test_keyword_matches_relevance_ranking():
     # 회귀: 구체적 키워드에 맞는 파일이 일반 키워드에만 맞는 파일보다 앞서야 한다.
     files = ["GODSEED_MASTER_PLAN.md", "verify_phase0.py", "verify_phase2f.py"]

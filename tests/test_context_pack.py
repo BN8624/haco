@@ -30,6 +30,45 @@ def test_build_context_pack_symbol_excerpt(sample_project, config):
     assert "def add" in md  # 실제 소스 excerpt가 들어간다
 
 
+def test_symbol_name_match_beats_signature_match(sample_project, config):
+    # Intent: task가 지목한 함수명(정확매칭)이 무관 함수의 시그니처 substring 매칭보다 우선.
+    # create_world는 signature에 rng를, target은 이름 자체가 키워드. target이 선택돼야 한다.
+    (sample_project / "eng.py").write_text(
+        "def create_world(width, height, rng):\n    return 1\n\n"
+        "def compute_starvation_pressure(food_ratio, has_agriculture):\n    return 2\n",
+        encoding="utf-8")
+    snapshot = {"repo_map": [{"file": "eng.py", "symbols": [
+        {"kind": "function", "name": "create_world",
+         "signature": "create_world(width, height, rng)", "line_start": 1, "line_end": 2},
+        {"kind": "function", "name": "compute_starvation_pressure",
+         "signature": "compute_starvation_pressure(food_ratio, has_agriculture)",
+         "line_start": 4, "line_end": 5},
+    ]}]}
+    packet = TaskPacket(files_to_read=["eng.py"],
+                        search_keywords=["compute_starvation_pressure", "rng"])
+    md, js = build_context_pack(project_path=sample_project, snapshot=snapshot,
+                                packet=packet, config=config)
+    syms = [f["symbol"] for f in js["files"]]
+    assert "compute_starvation_pressure" in syms
+    assert syms[0] == "compute_starvation_pressure"  # 정확매칭이 맨 앞
+
+
+def test_context_pack_uses_snapshot_search_hints(sample_project, config):
+    # locator가 search_keywords를 잘라도 snapshot.search_hints의 식별자로 심볼을 좁힌다.
+    snapshot = {"search_hints": ["compute_starvation_pressure"], "repo_map": [
+        {"file": "pkg/calc.py", "symbols": [
+            {"kind": "function", "name": "add", "line_start": 1, "line_end": 3}]}]}
+    (sample_project / "pkg" / "eng.py").write_text(
+        "def compute_starvation_pressure(x):\n    return x\n", encoding="utf-8")
+    snapshot["repo_map"].append({"file": "pkg/eng.py", "symbols": [
+        {"kind": "function", "name": "compute_starvation_pressure",
+         "signature": "compute_starvation_pressure(x)", "line_start": 1, "line_end": 2}]})
+    packet = TaskPacket(files_to_read=["pkg/eng.py"], search_keywords=[])  # locator가 다 잘림
+    md, js = build_context_pack(project_path=sample_project, snapshot=snapshot,
+                                packet=packet, config=config)
+    assert any("matched the task" in f["reason"] for f in js["files"])
+
+
 def test_build_context_pack_fail_closed_on_skip(sample_project, config):
     packet = TaskPacket(haco_status="skip_to_main_agent",
                         files_to_read=["pkg/calc.py"])

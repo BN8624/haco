@@ -186,7 +186,27 @@ def _extract_keywords(task: str) -> list[str]:
         if not (has_hangul or has_digit) and len(s) < 3:
             continue
         out.append(s)
-    return list(dict.fromkeys(out))[:20]
+    # Intent Expansion: 코드 식별자(함수/상수/파일 stem)를 일반 산문어보다 앞에 둔다. locator가
+    # 상위 소수만 쓰거나(예: [:8]) 목록을 자를 때 식별자가 잘려나가지 않게 한다. 안정 정렬로 원래
+    # 순서는 그룹 안에서 보존한다.
+    deduped = list(dict.fromkeys(out))
+    idents = [t for t in deduped if _is_identifier_like(t)]
+    rest = [t for t in deduped if not _is_identifier_like(t)]
+    return (idents + rest)[:20]
+
+
+def _is_identifier_like(token: str) -> bool:
+    """코드 식별자스러운 토큰인지. snake_case/camelCase/숫자혼합(phase5a, ticks10000)/ALLCAPS 상수."""
+    if "_" in token:
+        return True
+    has_alpha = any(c.isalpha() for c in token)
+    has_digit = any(c.isdigit() for c in token)
+    if has_alpha and has_digit:
+        return True  # phase5a, ticks10000, verify_phase2f 류
+    # 첫 글자 외 대문자 → camelCase 또는 ALLCAPS 상수(GODSEED, calculateGrowth)
+    if any(c.isupper() for c in token[1:]):
+        return True
+    return False
 
 
 def _keyword_matches(keywords: list[str], file_paths: list[str]) -> list[str]:
@@ -204,10 +224,20 @@ def _keyword_matches(keywords: list[str], file_paths: list[str]) -> list[str]:
     df = {k: sum(1 for _, low in lowered if k in low) for k in kws}
     scored: list[tuple[float, str]] = []
     for orig, low in lowered:
+        base = low.rsplit("/", 1)[-1]
+        stem = base.rsplit(".", 1)[0]
         score = 0.0
         for k in kws:
-            if df.get(k) and k in low:
-                score += len(k) / df[k]
+            if not df.get(k) or k not in low:
+                continue
+            # 파일명 매칭은 경로 어딘가 매칭보다 강하게. task가 명시한 파일 stem 정확매칭은 최상.
+            # (verify_phase5a가 keyword면 verify_phase5a.py가 verify_phase3a.py보다 확실히 앞선다.)
+            weight = len(k) / df[k]
+            if k == stem:
+                weight *= 4.0
+            elif k in base:
+                weight *= 2.0
+            score += weight
         if score:
             if low.startswith(("archive/", "deprecated/")) or any(s in low for s in downrank):
                 score *= 0.2
