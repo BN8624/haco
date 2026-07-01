@@ -55,7 +55,7 @@ The project-control documents are:
 
 Do not create additional long project-control documents unless the user explicitly approves.
 
-Do not create or maintain a `README.md` anywhere in this repository. It is intentionally removed (solo-use project). Do not re-add one, and do not treat its absence as a defect or a discrepancy to fix.
+Maintain a single root `README.md` whose sole audience is an AI coding agent using HACO from another project — how to invoke HACO, how to read its outputs, and a paste-in `HACO Usage Rule` block for the target project's `CLAUDE.md`/`AGENTS.md`. It is not a human-facing project overview; keep it usage-focused, not a philosophy essay. Do not create any other `README.md` elsewhere in the repository.
 
 Document roles:
 

@@ -8,7 +8,7 @@
 
 정본(`HACO_CANON.md`)이 약속한 핵심 산출물과 Fail Closed 원칙을 코드·테스트에 반영 완료. 최근 dogfood(GODSEED)에서 드러난 Locator context miss까지 교정. 문서 체계(정본 + `DOCS_INDEX` 라우터 + `CLAUDE`/`AGENTS` 규칙 + `HANDOFF` + `CHECKLIST`)는 신 표준으로 정착, 구 문서는 `archive/`.
 
-- `CLAUDE.md` ≡ `AGENTS.md` byte-identical (확인 완료). README는 규칙상 금지(개인용).
+- `CLAUDE.md` ≡ `AGENTS.md` byte-identical (확인 완료). 루트 `README.md`는 다른 프로젝트의 AI가 HACO 사용법을 읽는 용도(사람용 소개 아님) — 그 외 위치 README는 금지.
 
 ---
 
@@ -43,5 +43,5 @@ HACO 코어 + context offloading + fail-closed + locator ranking(2차 보강) + 
 
 - 저장소 정체성 먼저 확인 (`pwd` / `git remote -v` / `git status`). GODSEED 작업은 `C:\Users\USER\godseed`에서, HACO는 도구.
 - `HACO_CANON.md`는 정본이라 임의 수정 금지(수정 시 사용자 승인).
-- `CLAUDE.md` 수정 시 `AGENTS.md`도 동일 내용으로 갱신 후 `cmp -s` 검증. README 생성 금지.
+- `CLAUDE.md` 수정 시 `AGENTS.md`도 동일 내용으로 갱신 후 `cmp -s` 검증. 루트 `README.md`(AI 사용 가이드) 1개만 허용, 그 외 위치 README 금지.
 - 커밋하면 곧바로 push(사용자 규칙). 단 명시 파일만 스테이징, `.haco/` 커밋 금지.
