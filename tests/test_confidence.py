@@ -116,6 +116,91 @@ def test_tier_gating_downgrades_accept(tmp_path):
     assert metas[0].judge_status == "masked"  # tier<high면 draft_only
 
 
+def test_symbol_evidence_requires_symbols(config):
+    # repo_map에 파일은 있으나 symbols가 비어 있으면 symbol_evidence를 주지 않는다.
+    snap = {"file_paths_sample": ["a.py"], "repo_map": [{"file": "a.py", "symbols": []}],
+            "keyword_file_matches": ["a.py"]}
+    d = evaluate_confidence(snapshot=snap, locator={"files_to_read": ["a.py"],
+                                                    "search_keywords": ["x"]},
+                            context_pack_json=_cp(1), task_type="code_change",
+                            config=config)
+    assert "symbol_evidence" not in d["signals"]
+
+
+def test_keyword_evidence_requires_window(config):
+    # snapshot에 keyword_file_matches가 있어도 context_pack에 keyword_window가 없으면
+    # keyword_evidence를 주지 않는다(무관한 match로 점수 부풀림 방지).
+    snap = {"file_paths_sample": ["a.py"],
+            "repo_map": [{"file": "a.py", "symbols": [
+                {"kind": "function", "name": "f", "line_start": 1, "line_end": 3}]}],
+            "keyword_file_matches": ["a.py"]}
+    cp = {"files": [{"kind": "symbol"}], "budget": {"token_estimate": 50, "max_tokens": 8000}}
+    d = evaluate_confidence(snapshot=snap, locator={"files_to_read": ["a.py"],
+                                                    "search_keywords": ["zzz"]},
+                            context_pack_json=cp, task_type="code_change", config=config)
+    assert "keyword_evidence" not in d["signals"]
+
+
+def test_keyword_evidence_when_window_present(config):
+    snap = {"file_paths_sample": ["a.py"], "repo_map": []}
+    cp = {"files": [{"kind": "keyword_window"}],
+          "budget": {"token_estimate": 50, "max_tokens": 8000}}
+    d = evaluate_confidence(snapshot=snap, locator={"files_to_read": ["a.py"],
+                                                    "search_keywords": ["x"]},
+                            context_pack_json=cp, task_type="code_change", config=config)
+    assert "keyword_evidence" in d["signals"]
+
+
+def test_fullblock_missing_symbol_not_accepted(tmp_path):
+    # full_block target symbol이 repo_map에 없으면 high confidence여도 masked.
+    run = create_run(tmp_path)
+    meta = write_patch_candidate(run, {
+        "candidate_id": "candidate_01", "_target_files": ["pkg/calc.py"],
+        "_language": "python", "preferred_apply_method": "full_block",
+        "summary": "s", "risk": "low", "reason": "x",
+        "replacement_blocks": [{"file": "pkg/calc.py", "target": "ghost_fn",
+                                "language": "python", "code": "def ghost_fn(): pass",
+                                "apply_method": "replace entire function"}]})
+    snapshot = {"file_paths_sample": ["pkg/calc.py"],
+                "repo_map": [{"file": "pkg/calc.py", "symbols": [
+                    {"kind": "function", "name": "add"}]}]}
+    judge = {"accepted_candidates": ["candidate_01"]}
+    metas = apply_hard_filter(run, [meta], judge, snapshot)  # tier 기본 high
+    assert metas[0].judge_status == "masked"
+    assert "not found" in metas[0].judge_reason
+
+
+def test_fullblock_existing_symbol_can_accept(tmp_path):
+    run = create_run(tmp_path)
+    meta = write_patch_candidate(run, {
+        "candidate_id": "candidate_01", "_target_files": ["pkg/calc.py"],
+        "_language": "python", "preferred_apply_method": "full_block",
+        "summary": "s", "risk": "low", "reason": "x",
+        "replacement_blocks": [{"file": "pkg/calc.py", "target": "add",
+                                "language": "python", "code": "def add(a,b): return a+b",
+                                "apply_method": "replace entire function"}]})
+    snapshot = {"file_paths_sample": ["pkg/calc.py"],
+                "repo_map": [{"file": "pkg/calc.py", "symbols": [
+                    {"kind": "function", "name": "add"}]}]}
+    judge = {"accepted_candidates": ["candidate_01"]}
+    metas = apply_hard_filter(run, [meta], judge, snapshot)
+    assert metas[0].judge_status == "accepted"
+
+
+def test_fail_closed_skip_disables_doc_and_context(empty_project, config):
+    # skip(저신뢰/locator 실패)이면 doc_reporter를 돌리지 않고 context_pack은 비며
+    # context_pack_generated=False가 되어야 한다(저신뢰 출력은 짧아야 함).
+    import json
+    result = run_preflight(project_path=empty_project, task="add subtract function",
+                           profile="standard", config=config, provider=MockProvider())
+    run = Path(result["run_path"])
+    assert result["packet"]["haco_status"] == "skip_to_main_agent"
+    assert not (run / "worker_outputs" / "doc_reporter.json").exists()
+    cp = json.loads((run / "context_pack.json").read_text(encoding="utf-8"))
+    assert cp["files"] == []
+    assert result["packet"]["context_pack_generated"] is False
+
+
 def test_preflight_packet_has_confidence_fields(sample_project, config):
     result = run_preflight(project_path=sample_project,
                            task="Add a subtract function to calc.py",

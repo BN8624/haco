@@ -34,6 +34,11 @@ def write_patch_candidate(run_path: Path, output: dict) -> CandidateMetadata:
     cdir = _candidates_dir(run_path) / cid
     cdir.mkdir(parents=True, exist_ok=True)
 
+    # 실제 full_block 후보의 (file, target)을 기록해 두면 hard filter가 symbol 존재를 검증한다.
+    repl_targets = [{"file": _as_dict(b).get("file", ""),
+                     "target": _as_dict(b).get("target", "")}
+                    for b in (output.get("replacement_blocks") or [])]
+
     kind = "patch" if targets else "strategy"
     meta = CandidateMetadata(
         candidate_id=cid,
@@ -42,6 +47,7 @@ def write_patch_candidate(run_path: Path, output: dict) -> CandidateMetadata:
         language=language,
         confidence="medium" if targets else "low",
         preferred_apply_method=method,
+        replacement_targets=repl_targets,
         summary=summary,
         risk=risk,
         reason=output.get("reason", ""),
@@ -92,7 +98,8 @@ def write_patch_candidate(run_path: Path, output: dict) -> CandidateMetadata:
                 "notes": e.get("notes", ""),
             })
         write_json(cdir / "search_replace.json", {"edits": edits})
-    elif targets:
+    elif targets and not repl_blocks:
+        # full_block 후보(실제 replacement_blocks 보유)엔 placeholder search_replace를 쓰지 않는다.
         write_json(cdir / "search_replace.json", {
             "edits": [
                 {
@@ -223,6 +230,40 @@ def _anchor_blocks_accept(run_path: Path, cid: str,
     return None
 
 
+def _symbol_names(snapshot: dict, rel: str) -> set[str] | None:
+    """snapshot repo_map에서 파일 rel의 symbol 이름 집합. 파일 항목이 없으면 None(검증 불가)."""
+    for item in snapshot.get("repo_map", []) or []:
+        if isinstance(item, dict) and item.get("file") == rel:
+            names: set[str] = set()
+            for s in item.get("symbols", []) or []:
+                if isinstance(s, dict):
+                    if s.get("name"):
+                        names.add(s["name"])
+                    names.update(s.get("methods", []) or [])
+            return names
+    return None
+
+
+def _full_block_blocks_accept(meta: CandidateMetadata, snapshot: dict) -> str | None:
+    """full_block 후보의 target symbol 존재를 검증. accepted 불가 사유가 있으면 문자열.
+
+    §13/§17.1: target이 비었거나 placeholder이거나 repo_map/AST에서 확인 불가면 accepted가
+    될 수 없다(high confidence여도 masked). search_replace 후보는 replacement_targets가 비어 있어
+    이 규칙 대상이 아니다.
+    """
+    for rt in meta.replacement_targets or []:
+        target = (rt.get("target") or "").strip()
+        rel = rt.get("file", "")
+        if not target or "<<<" in target or target == "(function/class to identify)":
+            return "full-block target is empty or a placeholder"
+        names = _symbol_names(snapshot, rel)
+        if names is None:
+            return f"target symbol '{target}' not verifiable ({rel} absent from repo_map)"
+        if target not in names:
+            return f"target symbol '{target}' not found in {rel}"
+    return None
+
+
 def apply_hard_filter(run_path: Path, metas: list[CandidateMetadata],
                       judge: dict, snapshot: dict, *,
                       confidence_tier: str = "high",
@@ -272,6 +313,13 @@ def apply_hard_filter(run_path: Path, metas: list[CandidateMetadata],
             if anchor_reason:
                 status = "masked"
                 meta.judge_reason = f"Anchor check failed: {anchor_reason}."
+
+        # full_block 검증: target symbol이 없거나 확인 불가면 accepted 불가(§13).
+        if status == "accepted":
+            fb_reason = _full_block_blocks_accept(meta, snapshot)
+            if fb_reason:
+                status = "masked"
+                meta.judge_reason = f"Full-block check failed: {fb_reason}."
 
         # confidence tier가 high가 아니면 accepted를 draft_only로 강등(§17.1).
         if status == "accepted" and confidence_tier != "high":

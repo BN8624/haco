@@ -30,23 +30,40 @@ def evaluate_confidence(*, snapshot: dict, locator: dict, context_pack_json: dic
     files_to_read = list(locator.get("files_to_read", []) or [])
     n_files = len(files_to_read)
     known = _known_paths(snapshot)
-    repo_index = {item["file"] for item in snapshot.get("repo_map", []) or []
-                  if isinstance(item, dict) and item.get("file")}
+    # 파일별 실제 symbols. "파일이 repo_map에 있음"과 "symbols가 있음"을 구분한다.
+    repo_syms = {item["file"]: item.get("symbols", []) or []
+                 for item in snapshot.get("repo_map", []) or []
+                 if isinstance(item, dict) and item.get("file")}
+    keywords = [k.lower() for k in (locator.get("search_keywords") or []) if k]
     cp_files = context_pack_json.get("files", []) or []
+    cp_kinds = [f.get("kind") for f in cp_files]
     n_ranges = len(cp_files)
     budget = context_pack_json.get("budget", {}) or {}
     max_tokens = config.get("budgets", "max_context_pack_tokens", default=8000)
+
+    def _keyword_hits_symbol() -> bool:
+        for f in files_to_read:
+            for s in repo_syms.get(f, []):
+                blob = f"{s.get('name', '')} {s.get('signature', '')}".lower()
+                if any(k in blob for k in keywords):
+                    return True
+        return False
 
     # ---- 결정론 신호 카운트 ----
     signals: list[str] = []
     if files_to_read and any(f in known for f in files_to_read):
         signals.append("path_evidence")               # 실재하는 파일 경로
-    if any(f in repo_index for f in files_to_read):
-        signals.append("symbol_evidence")             # repo_map 심볼 존재
+    # symbol evidence: 대상 파일에 실제 symbols가 있고, context_pack이 symbol excerpt를
+    # 만들었거나 task keyword가 symbol name/signature와 매칭될 때만(단순 "파일 존재" 불충분).
+    has_real_symbols = any(repo_syms.get(f) for f in files_to_read)
+    if has_real_symbols and ("symbol" in cp_kinds or _keyword_hits_symbol()):
+        signals.append("symbol_evidence")
     if n_ranges > 0:
         signals.append("range_evidence")              # focused 범위 확보
-    if snapshot.get("keyword_file_matches"):
-        signals.append("keyword_evidence")            # 키워드 매칭 근거
+    # keyword evidence: files_to_read 안에서 실제 keyword window가 만들어졌을 때만
+    # (snapshot 어딘가의 무관한 keyword match로 점수가 부풀지 않게).
+    if "keyword_window" in cp_kinds:
+        signals.append("keyword_evidence")
     det_count = len(signals)
 
     # ---- Hard Gates (§17.1) ----
@@ -91,6 +108,7 @@ def evaluate_confidence(*, snapshot: dict, locator: dict, context_pack_json: dic
         "fail_closed_triggered": fail_closed,
         "fail_closed_reason": reason,
         "confidence_tier": tier,
+        "signals": signals,
         "evidence_score": score,
         "deterministic_signal_count": det_count,
         "hard_gates_triggered": gates,

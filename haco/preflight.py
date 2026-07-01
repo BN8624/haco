@@ -204,7 +204,10 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
                  task_type in ("code_change", "refactor", "test_failure"))
     run_test = (not skip and not suppressed and
                 "test_candidate" in profile_workers)
-    run_doc = "doc_reporter" in profile_workers
+    # fail-closed/skip이면 doc_reporter도 끈다(저신뢰 출력은 짧아야 함, §17.1).
+    # 단 docs_only 작업은 문서 안내가 핵심이라 예외로 허용.
+    run_doc = ((not skip or task_type == "docs_only") and
+               "doc_reporter" in profile_workers)
 
     def acall_ctx(name: str, extra: dict | None = None) -> dict:
         c = {"task": task, "worker": name, "snapshot": ctx_snapshot, "prior": outputs}
@@ -280,6 +283,22 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
             project_path, locator.get("files_to_edit", []) or [],
             task_type, run_path, max_ref)
 
+    # ---- context_pack (결정론적 focused excerpt; §9 최우선 산출물) ----
+    # 최종 skip 상태를 반영해 만든다: fail-closed면 haco_status=skip이라 짧은 pack(§17.1).
+    final_status_packet = TaskPacket(
+        files_to_read=locator.get("files_to_read", []) or [],
+        files_to_edit=locator.get("files_to_edit", []) or [],
+        search_keywords=locator.get("search_keywords", []) or [],
+        haco_status="skip_to_main_agent" if skip else "ready")
+    cp_md, cp_json = build_context_pack(
+        project_path=project_path, snapshot=snapshot, packet=final_status_packet,
+        config=config)
+    max_cp_tokens = config.get("budgets", "max_context_pack_tokens", default=8000)
+    cp_md, cp_notes = trim_text(cp_md, max_cp_tokens * 4, "context_pack")
+    # metric은 최종 context_pack 기준. fail-closed면 files=[]라 generated=False로 확정.
+    cp_generated = (not skip) and bool(cp_json.get("files"))
+    cp_tokens = cp_json.get("budget", {}).get("token_estimate", 0)
+
     # ---- aggregate ----
     packet = build_task_packet(
         run_id=run_path.name, project_path=str(project_path), outputs=outputs,
@@ -288,18 +307,10 @@ def run_preflight(*, project_path: Path, task: str, profile: str,
         locator_rescan_notes=rescan_notes, candidate_summary=candidate_summary,
         suggested_improvement=suggested, prior_change_reference=prior_ref,
         confidence=confidence,
-        context_pack_generated=bool(prelim_cp_json.get("files")),
-        context_pack_tokens_estimate=prelim_cp_json.get("budget", {}).get(
-            "token_estimate", 0),
+        context_pack_generated=cp_generated,
+        context_pack_tokens_estimate=cp_tokens,
     )
     write_json(run_path / "task_packet.json", packet.model_dump())
-
-    # ---- context_pack (결정론적 focused excerpt; §9 최우선 산출물) ----
-    # 최종 packet 기준으로 다시 만든다: skip이면 haco_status가 반영돼 짧은 pack(§17.1 fail closed).
-    cp_md, cp_json = build_context_pack(
-        project_path=project_path, snapshot=snapshot, packet=packet, config=config)
-    max_cp_tokens = config.get("budgets", "max_context_pack_tokens", default=8000)
-    cp_md, cp_notes = trim_text(cp_md, max_cp_tokens * 4, "context_pack")
     write_text(run_path / "context_pack.md", cp_md)
     write_json(run_path / "context_pack.json", cp_json)
 

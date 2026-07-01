@@ -117,6 +117,8 @@ class CandidateMetadata(BaseModel):
     judge_status: str = "masked"  # accepted | masked | rejected
     judge_reason: str = ""
     expose_in_execution_brief: bool = False
+    # full_block 후보의 (file, target) 목록. anchor 검증과 별개로 symbol 존재를 확인한다.
+    replacement_targets: list[dict] = Field(default_factory=list)
     summary: str = ""
     risk: Risk = "medium"
     reason: str = ""
