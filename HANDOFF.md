@@ -14,7 +14,7 @@
 
 ## 구현 상태
 
-HACO 코어 + context offloading + fail-closed + locator ranking 구현·검증 완료. `pytest` 125 passed, `doctor` 통과.
+HACO 코어 + context offloading + fail-closed + locator ranking(2차 보강) 구현·검증 완료. `pytest` 132 passed, `doctor` 통과.
 
 - 파이프라인: preflight(scan/repo_map → task_router → context_compressor → file_locator → **context_pack** → candidate → aggregate → brief) / postflight / doctor / bootstrap.
 - Provider: mock + google(gemma-4-31b-it, .env 11키 라이브 검증).
@@ -25,6 +25,7 @@ HACO 코어 + context offloading + fail-closed + locator ranking 구현·검증 
 - **postflight auto_diff_summary.md**(§7.3): git 작업트리 결정론 요약.
 - **Fail Closed / Confidence Calibration**(§17.1): `haco/confidence.py` — Hard Gate → Evidence Score → Tier. preflight가 후보 생성 前 평가, fail-closed면 skip. tier<high면 accepted→masked. candidate anchor 검증(placeholder/0회·다회 매칭/full_block symbol 미존재 → accepted 불가). 스키마/브리프/postflight에 confidence 필드.
 - **Locator Ranking (Intent Expansion)**: 식별자 키워드 상위화(절단 생존), 파일명 stem 정확매칭 boost, context_pack이 snapshot.search_hints 사용 + 심볼 매칭 tier(이름>시그니처), content-aware 랭킹(파일명 아닌 심볼 내용으로 타깃 파일 상위화). GODSEED miss(dataclass+phase3 → 실제 함수+phase5) 교정 확인.
+- **Locator Ranking 2차 보강**: `haco/ranking.py` `post_locator_rerank` — LLM locator는 제안자, 결정론 랭커가 최종 파일 순서 확정(preflight Stage 1.6, rescan 이후·context_pack 전). worker top과 다르면 `locator_adjusted`/`locator_adjust_reason`(packet/metrics). repo_map이 top-level 상수/설정(UPPER_CASE, `*_RELIEF/_THRESHOLD/_YEARS/_DAYS`, ast.Assign/AnnAssign, line 범위) 추출. context_pack symbol entry에 `match_tier`(exact_name/partial_name/signature) + 정확매칭 다수면 MAX_SYMBOLS 3→6 adaptive. confidence는 exact=strong_symbol_evidence(+25)/signature=weak(+10)로 세분화. 근거 없으면(score 0) locator 원본 유지(fail-closed).
 
 ---
 
