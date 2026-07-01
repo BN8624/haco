@@ -55,6 +55,8 @@ The project-control documents are:
 
 Do not create additional long project-control documents unless the user explicitly approves.
 
+Do not create or maintain a `README.md` anywhere in this repository. It is intentionally removed (solo-use project). Do not re-add one, and do not treat its absence as a defect or a discrepancy to fix.
+
 Document roles:
 
 ```text
