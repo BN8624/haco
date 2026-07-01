@@ -209,25 +209,51 @@ def _is_identifier_like(token: str) -> bool:
     return False
 
 
-def _keyword_matches(keywords: list[str], file_paths: list[str]) -> list[str]:
+def _symbol_index(repo_map: list[dict] | None) -> dict[str, set[str]]:
+    """파일(rel, lower) → 그 파일 심볼 이름 집합(lower). content-aware 랭킹용."""
+    index: dict[str, set[str]] = {}
+    for it in repo_map or []:
+        if not (isinstance(it, dict) and it.get("file")):
+            continue
+        names: set[str] = set()
+        for s in it.get("symbols", []) or []:
+            if isinstance(s, dict):
+                if s.get("name"):
+                    names.add(s["name"].lower())
+                names.update(m.lower() for m in s.get("methods", []) or [])
+        index[it["file"].lower()] = names
+    return index
+
+
+def _keyword_matches(keywords: list[str], file_paths: list[str],
+                     repo_map: list[dict] | None = None) -> list[str]:
     # 관련도순 정렬. 점수 = Σ (키워드 길이 / 해당 키워드의 document-frequency).
     # - 길이: 구체적인(긴) 키워드일수록 강하게.
     # - df로 나눔: 여러 파일에 흔히 등장하는 키워드("docs","validation")는 약하게,
     #   소수 파일에만 맞는 희귀 키워드("verify_phase2f")는 강하게.
     # 등장 순서가 아니라 이 점수로 정렬해야 실제 타깃이 흔한 키워드 매칭에 묻히지 않는다.
-    # 편집 가능성이 낮은 archive/deprecated/vendor 경로는 점수를 낮춰 live 파일에 밀리게 한다
-    # (목록에선 유지하되 상위 files_to_read를 닫힌/과거 문서가 잠식하지 않도록).
+    # content-aware: 파일명이 안 맞아도 그 파일의 repo_map 심볼 이름이 키워드와 맞으면 boost한다
+    #   (예: phase0_engine.py는 이름에 "starvation"이 없지만 compute_starvation_pressure를 보유).
+    # 편집 가능성이 낮은 archive/deprecated/vendor 경로는 점수를 낮춰 live 파일에 밀리게 한다.
     downrank = ("/archive/", "archive/", "/deprecated/", "deprecated/",
                 "/vendor/", "vendor/", "/third_party/", "third_party/")
     lowered = [(p, p.lower()) for p in file_paths]
     kws = [k.lower() for k in keywords if k]
     df = {k: sum(1 for _, low in lowered if k in low) for k in kws}
+    sym_index = _symbol_index(repo_map)
     scored: list[tuple[float, str]] = []
     for orig, low in lowered:
         base = low.rsplit("/", 1)[-1]
         stem = base.rsplit(".", 1)[0]
+        names = sym_index.get(low, set())
         score = 0.0
         for k in kws:
+            # content 매칭: 키워드가 그 파일 심볼 이름이면(정확) 강한 boost, 부분매칭은 약하게.
+            # df로 나누지 않는다(content df는 path df와 다르며, 심볼명 매칭은 고신호).
+            if k in names:
+                score += len(k) * 2.0
+            elif names and any(k in nm or nm in k for nm in names):
+                score += len(k) * 0.75
             if not df.get(k) or k not in low:
                 continue
             # 파일명 매칭은 경로 어딘가 매칭보다 강하게. task가 명시한 파일 stem 정확매칭은 최상.
@@ -268,15 +294,16 @@ def scan_project(project_path: Path, task: str, config: Config) -> dict:
     project_type = _detect_project_type(language, important_names)
     test_frameworks = _detect_test_frameworks(project_path, important_names, file_paths)
 
-    keywords = _extract_keywords(task)
-    keyword_matches = _keyword_matches(keywords, file_paths)
-
+    # repo_map을 먼저 만들어 content-aware 키워드 랭킹(심볼 이름 매칭)에 넘긴다.
     repo_map: list[dict] = []
     repo_map_status = "skipped"
     repo_map_notes: list[str] = []
     if sc.get("include_repo_map", True):
         repo_map, repo_map_status, repo_map_notes = build_repo_map(
             project_path, file_paths)
+
+    keywords = _extract_keywords(task)
+    keyword_matches = _keyword_matches(keywords, file_paths, repo_map)
 
     readme_preview = ""
     if sc.get("include_readme_preview", True):

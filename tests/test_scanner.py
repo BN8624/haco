@@ -42,6 +42,18 @@ def test_keyword_matches_filename_stem_boost():
     assert out[0] == "verify_phase5a.py"
 
 
+def test_keyword_matches_content_aware():
+    # 파일명이 안 맞아도 그 파일의 repo_map 심볼이 키워드와 맞으면 상위로 온다.
+    files = ["phase0_engine.py", "utils.py"]
+    repo_map = [
+        {"file": "phase0_engine.py", "symbols": [
+            {"kind": "function", "name": "compute_starvation_pressure"}]},
+        {"file": "utils.py", "symbols": [{"kind": "function", "name": "helper"}]},
+    ]
+    out = _keyword_matches(["compute_starvation_pressure"], files, repo_map)
+    assert out and out[0] == "phase0_engine.py"  # 파일명엔 없지만 심볼로 잡힘
+
+
 def test_keyword_matches_relevance_ranking():
     # 회귀: 구체적 키워드에 맞는 파일이 일반 키워드에만 맞는 파일보다 앞서야 한다.
     files = ["GODSEED_MASTER_PLAN.md", "verify_phase0.py", "verify_phase2f.py"]
